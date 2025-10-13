@@ -166,6 +166,51 @@ void sendMessage(std::string client_name, std::string send_message, int socket =
 }
 
 void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer, int recieved){
+    std::string msg(buffer);
+    if (msg.find("SENDMSG") != std::string::npos){
+        std::string cur_message;
+        bool got_id = false;
+        std::string group_str = "";
+
+        for (int i = 8; i < recieved; i++) {
+            if (!got_id && buffer[i] == ',') {
+                got_id = true;
+                continue;
+            }
+            if (got_id)
+                cur_message += buffer[i];
+            else
+                group_str += buffer[i];
+        }
+
+        std::cout << "[ACTION] Sending message: " << cur_message << " TO " << group_str << "\n";
+        messageStruct new_message;
+        new_message.from_name = "A_67";
+        new_message.to_name = "A_" + group_str;
+        new_message.message_data = cur_message;
+        if(message_queues.find(new_message.to_name) == message_queues.end()){
+            message_queues[new_message.to_name] = {new_message};
+        }
+        else{
+            message_queues[new_message.to_name].push_back(new_message);
+        }
+        return;
+    }
+    if (msg.find("GETMSG") != std::string::npos){
+        if(message_queues.find("A_67") == message_queues.end()){
+            message_queues["A_67"] = std::deque<messageStruct>();
+        }
+        if(message_queues["A_67"].empty()){
+            std::cout << "[INFO] NO NEW MESSAGES\n";
+        } else {
+            std::cout << "[ACTION] Showing oldest message: " << message_queues["A_67"].front().message_data << "\n";
+            message_queues["A_67"].pop_front();
+        }
+        return;
+    }
+
+
+
     int total_len = 0;
     std::cout << "[ACTION] DOING CLIENT COMMAND\n";
     if (recieved < 5) { // minimum frame size
