@@ -58,6 +58,7 @@ Run the client with the following syntax:
 ## Available Client Commands
 
 Once connected to your server, the client supports these commands:
+(Note that for this early version, responses to these are printed in the servers console and not sent to the client)
 
 - **GETMSG** - Retrieve a single message from the server for your group
 - **SENDMSG,GROUP_ID,message** - Send a message to specified group

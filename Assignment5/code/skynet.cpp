@@ -167,263 +167,275 @@ void sendMessage(std::string client_name, std::string send_message, int socket =
 }
 
 void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer, int recieved){
-    std::string msg(buffer);
-    if (msg.find("SENDMSG") != std::string::npos){
-        std::string cur_message;
-        bool got_id = false;
-        std::string group_str = "";
 
-        for (int i = 8; i < recieved; i++) {
-            if (!got_id && buffer[i] == ',') {
-                got_id = true;
-                continue;
-            }
-            if (got_id)
-                cur_message += buffer[i];
-            else
-                group_str += buffer[i];
-        }
+    if (find(clientSocketList.begin(), clientSocketList.end(), clientSocket) != clientSocketList.end()){
+        std::cout << "[INFO] COMMAND FROM OUR CLIENT (NOT SERVER)\n";
+        std::string msg(buffer);
+        if (msg.find("SENDMSG") != std::string::npos){
+            std::string cur_message;
+            bool got_id = false;
+            std::string group_str = "";
 
-        std::cout << "[ACTION] Sending message: " << cur_message << " TO " << group_str << "\n";
-        messageStruct new_message;
-        new_message.from_name = "A_67";
-        new_message.to_name = "A_" + group_str;
-        new_message.message_data = cur_message;
-        if(message_queues.find(new_message.to_name) == message_queues.end()){
-            message_queues[new_message.to_name] = {new_message};
-        }
-        else{
-            message_queues[new_message.to_name].push_back(new_message);
-        }
-        return;
-    }
-    if (msg.find("GETMSG") != std::string::npos){
-        if(message_queues.find("A_67") == message_queues.end()){
-            message_queues["A_67"] = std::deque<messageStruct>();
-        }
-        if(message_queues["A_67"].empty()){
-            std::cout << "[INFO] NO NEW MESSAGES\n";
-        } else {
-            std::cout << "[ACTION] Showing oldest message: " << message_queues["A_67"].front().message_data << "\n";
-            message_queues["A_67"].pop_front();
-        }
-        return;
-    }
-
-
-
-    int total_len = 0;
-    std::cout << "[ACTION] DOING CLIENT COMMAND\n";
-    if (recieved < 5) { // minimum frame size
-        std::cout << "[ERROR] Command too short\n";
-        return;
-    }
-
-    while (total_len < recieved){
-        uint16_t netlen;
-        memcpy(&netlen, buffer + total_len + 1, sizeof(netlen));
-        uint16_t msg_len = ntohs(netlen);
-
-        std::cout << "[INFO]   recieved message has a length of: " << msg_len << "\n";
-
-        std::string message;
-        message.insert(message.end(), buffer + total_len, buffer + total_len + msg_len);
-
-        // now you can sanity-check
-        if (msg_len > (uint16_t)recieved) {
-
-            std::cout << "[ERROR] incomplete frame: declared " << msg_len << " got " << recieved << "\n";
-            std::cout << "[INFO]   The Buffer(hex): ";
-            for (int i = total_len; i < recieved; i++) {
-                unsigned char c = buffer[i];
-                if (isprint(c))
-                    std::cout << c;
-                else
-                    std::cout << "\\x" << std::hex << (int)c << std::dec;
-            }
-            std::cout << "\n"; 
-            return;
-        }
-
-        std::string command_prefix = "";
-        bool found = false;
-        
-        if (message.rfind("HELO") != -1){
-            command_prefix = "HELO";
-            found = true;
-            std::cout << "[ACTION] DOING HELO\n";
-            std::string group_name_str = "";
-            group_name_str.insert(group_name_str.end(), buffer+total_len+9, buffer + total_len + msg_len-1);
-            std::cout << "[INFO]   The current group name: " << group_name_str << "\n";
-            
-            if(known_servers.find(group_name_str) != known_servers.end()){
-                one_hop_connections[group_name_str] = known_servers[group_name_str];
-            }
-            else{
-                serverConnection temp={.name=group_name_str, .addr=TSAM_IP, .port=-1, .socket=clientSocket}; //TODO: FIX THE IP HARDCODE
-                one_hop_connections[group_name_str] = temp;
-            }
-            if (message_queues.find(group_name_str) == message_queues.end()){
-                message_queues[group_name_str] = {};
-            }
-            if(known_servers.find(group_name_str) == known_servers.end()){
-                known_servers[group_name_str] = one_hop_connections[group_name_str];
-            }
-
-            // REMOVE FROM CLIENT LIST, SINCE THIS IS A SERVER
-            auto client_index = find(clientSocketList.begin(), clientSocketList.end(), clientSocket);
-            if (client_index != clientSocketList.end()){
-                clientSocketList.erase(client_index);
-            }
-            
-            std::string send_str = "SERVERS,";
-            send_str += "A5_67," + TSAM_IP + ",4067;";
-            for (auto& one_hopper : one_hop_connections){
-                send_str += one_hopper.second.name + ",";
-                send_str += one_hopper.second.addr + std::string(",");
-                send_str += std::to_string(one_hopper.second.port) + ";";
-            }
-            std::cout << "[INFO]   The send string: " << send_str << "\n";
-            sendMessage(group_name_str, send_str);
-        } 
-        else if (message.rfind("KEEPALIVE") != -1){
-            command_prefix = "KEEPALIVE";
-            found = true;
-        } 
-        else if (message.rfind("GETMSGS") != -1){
-            command_prefix = "GETMSGS";
-            found = true;
-            std::cout << "[ACTION] DOING GETMSGS\n";
-            bool exists = false;
-            serverConnection recipient;
-            for (auto& recipient_check : one_hop_connections){
-                if (recipient_check.second.socket == clientSocket){
-                    recipient = recipient_check.second;
-                    exists = true;
-                }
-            }
-            if (exists){
-                while (message_queues[recipient.name].size() > 0){
-                    messageStruct current_msg = message_queues[recipient.name].front();
-                    message_queues[recipient.name].pop_front();
-                    std::string send_str = "SENDMSG," + current_msg.to_name + "," + current_msg.from_name + "," + current_msg.message_data;
-                    sendMessage(recipient.name, send_str);
-                }
-            }
-        } 
-        else if (message.rfind("SENDMSG") != -1){
-            command_prefix = "SENDMSG";
-            found = true;
-
-            std::cout << "[ACTION] DOING SENDMSG\n";
-            
-            std::cout << "[INFO]   The message: "<< message << "\n";
-
-            messageStruct new_message;
-            std::string building_message = "";
-            int checks = 0;
-            std::string send_message_to = "";
-            std::string send_message_from = "";
-            std::cout << "[INFO] PARSING SEND MESSAGE STRING: " << building_message << " ";
-            for (int i = 11; i < msg_len; i++)
-            {
-                if (message[i] == ',' && checks < 3){
-                    if(checks == 1){
-                        send_message_to = building_message;
-                        std::cout << "SENDING MESSAGE TO: " << send_message_to << " ";
-                        building_message = "";
-                    }
-                    else if (checks == 2){
-                        send_message_from = building_message;
-                        std::cout << "SENDING MESSAGE FROM: " << send_message_from<< " ";  
-                        building_message = "";
-                    }
-                    checks += 1;
+            for (int i = 8; i < recieved; i++) {
+                if (!got_id && buffer[i] == ',') {
+                    got_id = true;
                     continue;
                 }
-                else{
-                    building_message += message[i];
-                }
+                if (got_id)
+                    cur_message += buffer[i];
+                else
+                    group_str += buffer[i];
             }
-            std::cout << "THE MESSAGE DATA: " << building_message << "\n";
-            new_message.from_name = send_message_from;
-            new_message.to_name = send_message_to;
-            new_message.message_data = building_message;
-            
-            if(message_queues.find(send_message_to) == message_queues.end()){
-                message_queues[send_message_to] = {new_message};
+
+            std::cout << "[ACTION] Sending message: " << cur_message << " TO " << group_str << "\n";
+            messageStruct new_message;
+            new_message.from_name = "A5_67";
+            new_message.to_name = "A5_" + group_str;
+            new_message.message_data = cur_message;
+            if(message_queues.find(new_message.to_name) == message_queues.end()){
+                message_queues[new_message.to_name] = {new_message};
             }
             else{
-                message_queues[send_message_to].push_back(new_message);
+                message_queues[new_message.to_name].push_back(new_message);
             }
-        } 
-        else if (message.rfind("STATUSREQ") != -1){
-            command_prefix = "STATUSREQ";
-            found = true;
-            
-        } 
-        else if (message.rfind("SERVER") != -1){
-            command_prefix = "SERVER";
-            found = true;
-
-            std::cout << "[ACTION] DOING SERVER\n";
-            
-            std::cout << "[INFO]   The message: "<< message << "\n";
-
-            int index = 12;
-            int cur_part = 0;
-            std::string current_server = "";
-            serverConnection current_connection;
-            while(index < message.size()){
-                if(message[index] == ';'){
-                    current_connection.port = std::stoi(current_server);
-                    std::cout << "PORT: " << current_server << " ";
-                    current_server = "";
-                    if(one_hop_connections.find(current_connection.name) != one_hop_connections.end()){
-                        std::string lookup_name = current_connection.name;
-                        if(one_hop_connections[lookup_name].port == -1){
-                            one_hop_connections[lookup_name].port = current_connection.port;
-                        }
-                    }
-
-                    known_servers[current_connection.name] = current_connection;
-                    current_connection = serverConnection{};
-                    current_server = "";
-                    cur_part = 0;
-                    std::cout << "\n";
-                }
-                else if(message[index] == ','){
-                    if(cur_part == 0){
-                        current_connection.name = current_server;
-                        std::cout << "[INFO]   NAME: " << current_server << " ";
-                        current_server = "";
-                    }
-                    else if(cur_part == 1){
-                        current_connection.addr = current_server;
-                        std::cout << "IP: " << current_server << " ";
-                        current_server = "";
-                    }
-                    cur_part += 1;
-                }
-                else{
-                    current_server += message[index];
-                }
-                index += 1;
-            }
-
-        }
-        else if (message.rfind("STATUSRESP") != -1){
-            command_prefix = "STATUSRESP";
-            found = true;
-        } 
-        std::cout << "[INFO]   The current command prefix: " << command_prefix << "\n";
-        if(found == false){
-            //std::cout << "Unrecognized command prefix";
             return;
         }
-        total_len += msg_len;
+        if (msg.find("GETMSG") != std::string::npos){
+            if(message_queues.find("A5_67") == message_queues.end()){
+                message_queues["A5_67"] = std::deque<messageStruct>();
+            }
+            if(message_queues["A5_67"].empty()){
+                std::cout << "[INFO] NO NEW MESSAGES\n";
+            } else {
+                std::cout << "[ACTION] Showing oldest message: " << message_queues["A5_67"].front().message_data << "\n";
+                message_queues["A5_67"].pop_front();
+            }
+            return;
+        }
+        if (msg.find("LISTSERVERS") != std::string::npos){
+            std::string all_servers;
+            for (auto& serv : one_hop_connections){
+                all_servers += serv.second.name += ",";
+            }
+            std::cout << "[ACTION] LISTING SERVERS: " << all_servers << "\n";
+            return;
+        }
+
     }
-    
+
+    else{
+        int total_len = 0;
+        std::cout << "[ACTION] DOING CLIENT COMMAND\n";
+        if (recieved < 5) { // minimum frame size
+            std::cout << "[ERROR] Command too short\n";
+            return;
+        }
+
+        while (total_len < recieved){
+            uint16_t netlen;
+            memcpy(&netlen, buffer + total_len + 1, sizeof(netlen));
+            uint16_t msg_len = ntohs(netlen);
+
+            std::cout << "[INFO]   recieved message has a length of: " << msg_len << "\n";
+
+            std::string message;
+            message.insert(message.end(), buffer + total_len, buffer + total_len + msg_len);
+
+            // now you can sanity-check
+            if (msg_len > (uint16_t)recieved) {
+
+                std::cout << "[ERROR] incomplete frame: declared " << msg_len << " got " << recieved << "\n";
+                std::cout << "[INFO]   The Buffer(hex): ";
+                for (int i = total_len; i < recieved; i++) {
+                    unsigned char c = buffer[i];
+                    if (isprint(c))
+                        std::cout << c;
+                    else
+                        std::cout << "\\x" << std::hex << (int)c << std::dec;
+                }
+                std::cout << "\n"; 
+                return;
+            }
+
+            std::string command_prefix = "";
+            bool found = false;
+            
+            if (message.rfind("HELO") != -1){
+                command_prefix = "HELO";
+                found = true;
+                std::cout << "[ACTION] DOING HELO\n";
+                std::string group_name_str = "";
+                group_name_str.insert(group_name_str.end(), buffer+total_len+9, buffer + total_len + msg_len-1);
+                std::cout << "[INFO]   The current group name: " << group_name_str << "\n";
+                
+                if(known_servers.find(group_name_str) != known_servers.end()){
+                    one_hop_connections[group_name_str] = known_servers[group_name_str];
+                }
+                else{
+                    serverConnection temp={.name=group_name_str, .addr=TSAM_IP, .port=-1, .socket=clientSocket}; //TODO: FIX THE IP HARDCODE
+                    one_hop_connections[group_name_str] = temp;
+                }
+                if (message_queues.find(group_name_str) == message_queues.end()){
+                    message_queues[group_name_str] = {};
+                }
+                if(known_servers.find(group_name_str) == known_servers.end()){
+                    known_servers[group_name_str] = one_hop_connections[group_name_str];
+                }
+
+                // REMOVE FROM CLIENT LIST, SINCE THIS IS A SERVER
+                auto client_index = find(clientSocketList.begin(), clientSocketList.end(), clientSocket);
+                if (client_index != clientSocketList.end()){
+                    clientSocketList.erase(client_index);
+                }
+                
+                std::string send_str = "SERVERS,";
+                send_str += "A5_67," + TSAM_IP + ",4067;";
+                for (auto& one_hopper : one_hop_connections){
+                    send_str += one_hopper.second.name + ",";
+                    send_str += one_hopper.second.addr + std::string(",");
+                    send_str += std::to_string(one_hopper.second.port) + ";";
+                }
+                std::cout << "[INFO]   The send string: " << send_str << "\n";
+                sendMessage(group_name_str, send_str);
+            } 
+            else if (message.rfind("KEEPALIVE") != -1){
+                command_prefix = "KEEPALIVE";
+                found = true;
+            } 
+            else if (message.rfind("GETMSGS") != -1){
+                command_prefix = "GETMSGS";
+                found = true;
+                std::cout << "[ACTION] DOING GETMSGS\n";
+                bool exists = false;
+                serverConnection recipient;
+                for (auto& recipient_check : one_hop_connections){
+                    if (recipient_check.second.socket == clientSocket){
+                        recipient = recipient_check.second;
+                        exists = true;
+                    }
+                }
+                if (exists){
+                    while (message_queues[recipient.name].size() > 0){
+                        messageStruct current_msg = message_queues[recipient.name].front();
+                        message_queues[recipient.name].pop_front();
+                        std::string send_str = "SENDMSG," + current_msg.to_name + "," + current_msg.from_name + "," + current_msg.message_data;
+                        sendMessage(recipient.name, send_str);
+                    }
+                }
+            } 
+            else if (message.rfind("SENDMSG") != -1){
+                command_prefix = "SENDMSG";
+                found = true;
+
+                std::cout << "[ACTION] DOING SENDMSG\n";
+                
+                std::cout << "[INFO]   The message: "<< message << "\n";
+
+                messageStruct new_message;
+                std::string building_message = "";
+                int checks = 0;
+                std::string send_message_to = "";
+                std::string send_message_from = "";
+                std::cout << "[INFO] PARSING SEND MESSAGE STRING: " << building_message << " ";
+                for (int i = 11; i < msg_len; i++)
+                {
+                    if (message[i] == ',' && checks < 3){
+                        if(checks == 1){
+                            send_message_to = building_message;
+                            std::cout << "SENDING MESSAGE TO: " << send_message_to << " ";
+                            building_message = "";
+                        }
+                        else if (checks == 2){
+                            send_message_from = building_message;
+                            std::cout << "SENDING MESSAGE FROM: " << send_message_from<< " ";  
+                            building_message = "";
+                        }
+                        checks += 1;
+                        continue;
+                    }
+                    else{
+                        building_message += message[i];
+                    }
+                }
+                std::cout << "THE MESSAGE DATA: " << building_message << "\n";
+                new_message.from_name = send_message_from;
+                new_message.to_name = send_message_to;
+                new_message.message_data = building_message;
+                
+                if(message_queues.find(send_message_to) == message_queues.end()){
+                    message_queues[send_message_to] = {new_message};
+                }
+                else{
+                    message_queues[send_message_to].push_back(new_message);
+                }
+            } 
+            else if (message.rfind("STATUSREQ") != -1){
+                command_prefix = "STATUSREQ";
+                found = true;
+                
+            } 
+            else if (message.rfind("SERVER") != -1){
+                command_prefix = "SERVER";
+                found = true;
+
+                std::cout << "[ACTION] DOING SERVER\n";
+                
+                std::cout << "[INFO]   The message: "<< message << "\n";
+
+                int index = 12;
+                int cur_part = 0;
+                std::string current_server = "";
+                serverConnection current_connection;
+                while(index < message.size()){
+                    if(message[index] == ';'){
+                        current_connection.port = std::stoi(current_server);
+                        std::cout << "PORT: " << current_server << " ";
+                        current_server = "";
+                        if(one_hop_connections.find(current_connection.name) != one_hop_connections.end()){
+                            std::string lookup_name = current_connection.name;
+                            if(one_hop_connections[lookup_name].port == -1){
+                                one_hop_connections[lookup_name].port = current_connection.port;
+                            }
+                        }
+
+                        known_servers[current_connection.name] = current_connection;
+                        current_connection = serverConnection{};
+                        current_server = "";
+                        cur_part = 0;
+                        std::cout << "\n";
+                    }
+                    else if(message[index] == ','){
+                        if(cur_part == 0){
+                            current_connection.name = current_server;
+                            std::cout << "[INFO]   NAME: " << current_server << " ";
+                            current_server = "";
+                        }
+                        else if(cur_part == 1){
+                            current_connection.addr = current_server;
+                            std::cout << "IP: " << current_server << " ";
+                            current_server = "";
+                        }
+                        cur_part += 1;
+                    }
+                    else{
+                        current_server += message[index];
+                    }
+                    index += 1;
+                }
+
+            }
+            else if (message.rfind("STATUSRESP") != -1){
+                command_prefix = "STATUSRESP";
+                found = true;
+            } 
+            std::cout << "[INFO]   The current command prefix: " << command_prefix << "\n";
+            if(found == false){
+                //std::cout << "Unrecognized command prefix";
+                return;
+            }
+            total_len += msg_len;
+        }
+    }
 }
 
 int main(int argc, char const *argv[])
