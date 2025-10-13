@@ -64,6 +64,7 @@ std::map<int, Client*> clients;
 std::map<std::string, serverConnection> one_hop_connections;
 std::map<std::string, serverConnection> known_servers;
 std::map<std::string, std::deque<messageStruct> > message_queues;
+std::vector<int> clientSocketList; // LIST OF SOCKETS THAT ARE NOT SERVERS
 // TODO: HARDCODED CHANGE LATER
 std::string TSAM_IP = "130.208.246.98";
 
@@ -120,7 +121,7 @@ int open_sock(int port_nr){
 void closeClient(int clientSocket, std::vector<pollfd>& autobots)
 {
 
-    printf("ACTION] Closing client socket: %d\n", clientSocket);
+    printf("[ACTION] Closing client socket: %d\n", clientSocket);
 
      // If this client's socket is maxfds then the next lowest
      // one has to be determined. Socket fd's can be reused by the Kernel,
@@ -223,6 +224,12 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             if(known_servers.find(group_name_str) == known_servers.end()){
                 known_servers[group_name_str] = one_hop_connections[group_name_str];
             }
+
+            // REMOVE FROM CLIENT LIST, SINCE THIS IS A SERVER
+            auto client_index = find(clientSocketList.begin(), clientSocketList.end(), clientSocket);
+            if (client_index != clientSocketList.end()){
+                clientSocketList.erase(client_index);
+            }
             
             std::string send_str = "SERVERS,";
             send_str += "A5_67," + TSAM_IP + ",4067;";
@@ -308,6 +315,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
         else if (message.rfind("STATUSREQ") != -1){
             command_prefix = "STATUSREQ";
             found = true;
+            
         } 
         else if (message.rfind("SERVER") != -1){
             command_prefix = "SERVER";
@@ -475,6 +483,16 @@ int main(int argc, char const *argv[])
                 std::string message_to_send = "KEEPALIVE," + std::to_string(message_queues[recipient.name].size());
                 sendMessage(recipient.name, message_to_send);
             }
+
+            // std::cout << "\n\n\nTEST\nALL SOCKS: ";
+            // for (auto& sock : autobots){
+            //     std::cout << sock.fd << " ";
+            // }
+            // std::cout << "\nCLIENT SOCKS: ";
+            // for (auto& sock : clientSocketList){
+            //     std::cout << sock << " ";
+            // }
+            // std::cout << "\n";
         }
 
         if (n < 0){
@@ -489,6 +507,7 @@ int main(int argc, char const *argv[])
                         clientSock = accept(listenSock, (struct sockaddr *)&client,&clientLen);
                         pollfd temp{.fd=clientSock, .events=POLLIN, .revents=0};
                         autobots.push_back(temp);
+                        clientSocketList.push_back(temp.fd);
                         printf("accept***\n");
                         clients[clientSock] = new Client(clientSock);
                         n--;
