@@ -68,6 +68,7 @@ std::vector<int> clientSocketList; // LIST OF SOCKETS THAT ARE NOT SERVERS
 // TODO: HARDCODED CHANGE LATER
 std::string TSAM_IP = "130.208.246.98";
 
+bool SENDINGSTATUS = true;
 
 int open_sock(int port_nr){
 
@@ -394,7 +395,33 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 }
             } 
             else if (message.rfind("STATUSREQ") != -1){
+                std::string send_str = "";
+                int index = 0;
+                for (const auto& pair : one_hop_connections){
+                    serverConnection server = pair.second;
+                    if (index == 0){
+                        if (message_queues.find(server.name) != message_queues.end()){
+                            send_str += server.name + "," + std::to_string(message_queues[server.name].size());
+                        }
+                        else{
+                            send_str += server.name + "," + "0,";
+                        }
+                        index = 1;
+                    }
+                    else{
+                        if (message_queues.find(server.name) != message_queues.end()){
+                            send_str += "," + server.name + "," + std::to_string(message_queues[server.name].size());
+                        }
+                        else{
+                            send_str += "," + server.name + "," + "0,";
+                        }
+                    }
+                }
+                send_str = "STATUSRESP," + send_str;
+                std::cout << "[ACTION] Sending statusresp, the message is: " << send_str << "\n";
+                sendMessage("", send_str, clientSocket=clientSocket);
                 command_prefix = "STATUSREQ";
+
                 found = true;
                 
             } 
@@ -552,13 +579,16 @@ int main(int argc, char const *argv[])
 
         // KEEP ALIVE SENDING
         auto time_passed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now() - start);
-        if (time_passed.count() == 65){
+        if (time_passed.count() >= 65){
             std::cout << "[ACTION] SENDING KEEPALIVES NOW NOW NOW\n";
             start = std::chrono::high_resolution_clock::now();
             for (auto& connection : one_hop_connections){
                 serverConnection recipient = connection.second;
                 if(recipient.name == "A5_67"){
                     continue;
+                }
+                if(SENDINGSTATUS){
+                    sendMessage(recipient.name, "STATUSREQ");
                 }
                 std::string message_to_send = "KEEPALIVE," + std::to_string(message_queues[recipient.name].size());
                 sendMessage(recipient.name, message_to_send);
@@ -573,6 +603,7 @@ int main(int argc, char const *argv[])
             //     std::cout << sock << " ";
             // }
             // std::cout << "\n";
+            SENDINGSTATUS = !SENDINGSTATUS;
         }
 
         if (n < 0){
