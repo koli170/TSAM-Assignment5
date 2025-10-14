@@ -167,6 +167,41 @@ void sendMessage(std::string client_name, std::string send_message, int socket =
     // TODO: ERROR HANDLING
 }
 
+int connectToServer(serverConnection victim, std::vector<pollfd> &autobots){
+    int connectSock = socket(AF_INET, SOCK_STREAM, 0);
+    if(connectSock < 0){
+        perror("Failed to create client socket");
+        return -1;
+    }
+
+    if (connectSock == -1){
+        std::cout << "[ERROR] opening connect sock\n";
+        return -1;
+    }
+
+    struct sockaddr_in server_addr;
+
+    memset(&server_addr, 0, sizeof(server_addr)); 
+
+    server_addr.sin_family = AF_INET;
+    inet_pton(AF_INET, victim.addr.c_str(), &server_addr.sin_addr);
+    server_addr.sin_port = htons(victim.port);
+
+    if (connect(connectSock, (sockaddr*) &server_addr, sizeof(server_addr)) < 0){
+        std::cout << "[ERROR] Initial connection sock\n";
+        return 0;
+    }
+    victim.socket = connectSock;
+    pollfd temp{.fd=connectSock, .events=POLLIN, .revents=0};
+    autobots.push_back(temp);
+    clients[temp.fd] = new Client(temp.fd);
+
+
+    std::string command = "HELO,A5_67";
+    sendMessage(victim.name, command, connectSock);
+    return connectSock;
+}
+
 void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer, int recieved){
 
     if (find(clientSocketList.begin(), clientSocketList.end(), clientSocket) != clientSocketList.end()){
@@ -450,6 +485,16 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                         }
 
                         known_servers[current_connection.name] = current_connection;
+
+                        if(one_hop_connections.find(current_connection.name) == one_hop_connections.end()){
+                            if (one_hop_connections.size() < 8){
+                                int result = connectToServer(current_connection, autobots);
+                                if (result == -1){
+                                    std::cout << "[ERROR] Failed to connect to server\n";
+                                }
+                            }
+                        }
+
                         current_connection = serverConnection{};
                         current_server = "";
                         cur_part = 0;
