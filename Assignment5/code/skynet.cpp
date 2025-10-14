@@ -167,8 +167,9 @@ void sendMessage(std::string client_name, std::string send_message, int socket =
     // TODO: ERROR HANDLING
 }
 
-int connectToServer(serverConnection victim, std::vector<pollfd> &autobots){
+int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
     int connectSock = socket(AF_INET, SOCK_STREAM, 0);
+    std::cout << "[INFO] ATTEMPTING TO CONNECT TO " << victim.name << "\n";
     if(connectSock < 0){
         perror("Failed to create client socket");
         return -1;
@@ -185,6 +186,12 @@ int connectToServer(serverConnection victim, std::vector<pollfd> &autobots){
 
     server_addr.sin_family = AF_INET;
     inet_pton(AF_INET, victim.addr.c_str(), &server_addr.sin_addr);
+    if (victim.port == -1){
+        int pos = victim.name.find("_");
+        std::string id = victim.name.substr(pos + 1);
+        victim.port = 4000 + stoi(id);
+    }
+    std::cout << "                PORT " << victim.port << "\n";
     server_addr.sin_port = htons(victim.port);
 
     if (connect(connectSock, (sockaddr*) &server_addr, sizeof(server_addr)) < 0){
@@ -493,7 +500,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
 
                         known_servers[current_connection.name] = current_connection;
 
-                        if(one_hop_connections.find(current_connection.name) == one_hop_connections.end()){
+                        if(one_hop_connections.find(current_connection.name) == one_hop_connections.end() && current_connection.name != "A5_67"){
                             if (one_hop_connections.size() < 8){
                                 int result = connectToServer(current_connection, autobots);
                                 if (result == -1){
