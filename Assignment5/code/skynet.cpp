@@ -271,8 +271,15 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
         }
         if (msg.find("LISTSERVERS") != std::string::npos){
             std::string all_servers;
+            int index = 0;
             for (auto& serv : one_hop_connections){
-                all_servers += serv.second.name + ",";
+                if (index == 0){
+                    all_servers += serv.second.name;
+                    index = 1;
+                }
+                else{
+                    all_servers += ","+serv.second.name;
+                }
             }
             std::cout << "[ACTION] LISTING SERVERS: " << all_servers << "\n";
             std::string reply = all_servers;
