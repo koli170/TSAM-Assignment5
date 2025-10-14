@@ -190,7 +190,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             std::cout << "[ACTION] Sending message: " << cur_message << " TO " << group_str << "\n";
             messageStruct new_message;
             new_message.from_name = "A5_67";
-            new_message.to_name = "A5_" + group_str;
+            new_message.to_name = group_str;
             new_message.message_data = cur_message;
             if(message_queues.find(new_message.to_name) == message_queues.end()){
                 message_queues[new_message.to_name] = {new_message};
