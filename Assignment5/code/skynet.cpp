@@ -61,7 +61,7 @@ struct messageStruct{
 };
 
 std::map<int, Client*> clients;
-std::map<std::string, serverConnection> one_hop_connections;
+std::map<std::string, serverConnection> one_hop_connections; // KEY: SERVER NAME
 std::map<std::string, serverConnection> known_servers;
 std::map<std::string, std::deque<messageStruct> > message_queues;
 std::vector<int> clientSocketList; // LIST OF SOCKETS THAT ARE NOT SERVERS
@@ -188,6 +188,15 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             }
 
             std::cout << "[ACTION] Sending message: " << cur_message << " TO " << group_str << "\n";
+
+            if (one_hop_connections.find(group_str) != one_hop_connections.end()){
+                std::string send_str = "SENDMSG," + group_str + ",A5_67," + cur_message;
+                sendMessage(group_str, send_str);
+                return;
+            }
+
+            std::cout << "[INFO]   RECIPIENT NOT FOUND IN ONE HOP CONNECTIONS, ADDING MESSAGE TO QUEUE\n";
+
             messageStruct new_message;
             new_message.from_name = "A5_67";
             new_message.to_name = group_str;
@@ -211,7 +220,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 message_queues["A5_67"] = std::deque<messageStruct>();
             }
             if(message_queues["A5_67"].empty()){
-                std::cout << "[INFO] NO NEW MESSAGES\n";
+                std::cout << "[INFO]   NO NEW MESSAGES\n";
                 reply = "NO NEW MESSAGES ON SERVER";
             } else {
                 std::cout << "[ACTION] Showing oldest message: " << message_queues["A5_67"].front().message_data << "\n";
@@ -227,7 +236,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
         if (msg.find("LISTSERVERS") != std::string::npos){
             std::string all_servers;
             for (auto& serv : one_hop_connections){
-                all_servers += serv.second.name += ",";
+                all_servers += serv.second.name + ",";
             }
             std::cout << "[ACTION] LISTING SERVERS: " << all_servers << "\n";
             std::string reply = all_servers;
@@ -237,10 +246,8 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             }
             return;
         }
-
     }
 
-    else{
         int total_len = 0;
         std::cout << "[ACTION] DOING CLIENT COMMAND\n";
         if (recieved < 5) { // minimum frame size
@@ -451,7 +458,6 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 return;
             }
             total_len += msg_len;
-        }
     }
 }
 
@@ -650,7 +656,11 @@ int main(int argc, char const *argv[])
                 // Remove client from the clients list
                 for(auto const& c : disconnectedClients){
                     clients.erase(c->sock);
-                    
+                    for (auto& cn : one_hop_connections){
+                        if (cn.second.socket == c->sock){
+                            one_hop_connections.erase(cn.first);
+                        }
+                    }
                 }
 
             }
