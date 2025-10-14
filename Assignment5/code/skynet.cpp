@@ -267,7 +267,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 reply = "NO NEW MESSAGES ON SERVER";
             } else {
                 std::cout << "[ACTION] Showing oldest message: " << message_queues["A5_67"].front().message_data << "\n";
-                reply = message_queues["A5_67"].front().message_data;
+                reply = "[" + message_queues["A5_67"].front().from_name +  "] " + message_queues["A5_67"].front().message_data;
                 message_queues["A5_67"].pop_front();
             }
             int nsent = send(clientSocket, reply.c_str(), reply.size(), 0);
