@@ -198,17 +198,29 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             else{
                 message_queues[new_message.to_name].push_back(new_message);
             }
+            std::string reply = "MESSAGE SENT TO " + group_str;
+            int nsent = send(clientSocket, reply.c_str(), reply.size(), 0);
+            if (nsent == -1){
+                std::cout << "[ERROR] FAILED TO SEND REPLY TO CLIENT\n";
+            }
             return;
         }
         if (msg.find("GETMSG") != std::string::npos){
+            std::string reply;
             if(message_queues.find("A5_67") == message_queues.end()){
                 message_queues["A5_67"] = std::deque<messageStruct>();
             }
             if(message_queues["A5_67"].empty()){
                 std::cout << "[INFO] NO NEW MESSAGES\n";
+                reply = "NO NEW MESSAGES ON SERVER";
             } else {
                 std::cout << "[ACTION] Showing oldest message: " << message_queues["A5_67"].front().message_data << "\n";
+                reply = message_queues["A5_67"].front().message_data;
                 message_queues["A5_67"].pop_front();
+            }
+            int nsent = send(clientSocket, reply.c_str(), reply.size(), 0);
+            if (nsent == -1){
+                std::cout << "[ERROR] FAILED TO SEND REPLY TO CLIENT\n";
             }
             return;
         }
@@ -218,6 +230,11 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 all_servers += serv.second.name += ",";
             }
             std::cout << "[ACTION] LISTING SERVERS: " << all_servers << "\n";
+            std::string reply = all_servers;
+            int nsent = send(clientSocket, reply.c_str(), reply.size(), 0);
+            if (nsent == -1){
+                std::cout << "[ERROR] FAILED TO SEND REPLY TO CLIENT\n";
+            }
             return;
         }
 

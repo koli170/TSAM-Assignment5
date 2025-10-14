@@ -132,7 +132,7 @@ int main(int argc, char* argv[])
         {
             perror("send() to server failed: ");
             finished = true;
-    }
+        }
 
     }
 }
