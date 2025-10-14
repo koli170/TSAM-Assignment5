@@ -654,14 +654,18 @@ int main(int argc, char const *argv[])
                     }
                 }
                 // Remove client from the clients list
-                for(auto const& c : disconnectedClients){
-                    clients.erase(c->sock);
-                    for (auto& cn : one_hop_connections){
-                        if (cn.second.socket == c->sock){
-                            one_hop_connections.erase(cn.first);
+                for (auto const& c : disconnectedClients) {
+                    for (auto it = one_hop_connections.begin(); it != one_hop_connections.end(); ) {
+                        if (it->second.socket == c->sock) {
+                            it = one_hop_connections.erase(it);
+                            break;
+                        } else {
+                            ++it;
                         }
                     }
+                    clients.erase(c->sock);
                 }
+
 
             }
         }
