@@ -366,6 +366,27 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 sendMessage(group_name_str, send_str);
             } 
             else if (message.rfind("KEEPALIVE") != -1){
+                std::cout << "[ACTION] DOING KEEPALIVE WITH: " << message << " \n";
+                std::string message_len = "";
+                std::string TEST = "";
+                bool found = false;
+                for (int i = 0; i < msg_len; i++)
+                {
+                    if (found){
+                        message_len += message[i];
+                    }
+                    if (message[i] == ','){
+                        found == true;
+                    }
+                    TEST+=message[i];
+                }
+                std::cout << "[INFO] CONVERTING: " << message_len << " TO INT " << TEST<< "\n";
+                int message_len_int = std::stoi(message_len);
+                if(message_len_int > 0){
+                    std::cout << "[ACTION] SENDING GETMSG\n";
+                    sendMessage("", "GETMSG", clientSocket);
+                }
+                
                 command_prefix = "KEEPALIVE";
                 found = true;
             } 
