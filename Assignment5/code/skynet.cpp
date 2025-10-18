@@ -194,6 +194,10 @@ int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
     std::cout << "                PORT " << victim.port << "\n";
     server_addr.sin_port = htons(victim.port);
 
+    if (victim.port == 4067 || victim.port > 5500 || victim.port < 4000){
+        return -1;
+    }
+
     if (connect(connectSock, (sockaddr*) &server_addr, sizeof(server_addr)) < 0){
         std::cout << "[ERROR] Initial connection sock\n";
         return 0;
