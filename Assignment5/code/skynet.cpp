@@ -23,6 +23,7 @@
 #include <thread>
 #include <chrono>
 #include <deque>
+#include <fstream>
 
 #include <unistd.h>
 
@@ -67,8 +68,30 @@ std::map<std::string, std::deque<messageStruct> > message_queues;
 std::vector<int> clientSocketList; // LIST OF SOCKETS THAT ARE NOT SERVERS
 // TODO: HARDCODED CHANGE LATER
 std::string TSAM_IP = "130.208.246.98";
+const char *path="mission_report";
+std::ofstream mission_report(path);
 
 bool SENDINGSTATUS = true;
+
+void log_message(std::ofstream &file, char message_type = 'i',  std::string message = ""){
+    // i: INFO
+    // e: ERROR
+    // a: ACTION
+    std::time_t t = std::time(nullptr);
+    std::tm tm = *std::localtime(&t);
+    file << std::put_time(&tm, "[%F %T] ");
+    if (message_type == 'i'){
+        file << "[INFO]   ";
+    }
+    if (message_type == 'e'){
+        file << "[ERROR]  ";
+    }
+    if (message_type == 'a'){
+        file << "[ACTION] ";
+    }
+    file << message << "\n";
+}
+
 
 int open_sock(int port_nr){
 
@@ -79,12 +102,14 @@ int open_sock(int port_nr){
 #ifdef __APPLE__     
     if((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0){
         perror("Failed to open socket");
+        log_message(mission_report, 'e', "Failed to open socket");
         return(-1);
     }
 #else
     if((sock = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0)) < 0)
     {
         perror("Failed to open socket");
+        log_message(mission_report, 'e', "Failed to open socket");
         return(-1);
     }
 #endif
@@ -92,12 +117,14 @@ int open_sock(int port_nr){
    if(setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &set, sizeof(set)) < 0)
    {
       perror("Failed to set SO_REUSEADDR:");
+      log_message(mission_report, 'e', "Failed to set SO_REUSEADDR");
    }
    set = 1;
 #ifdef __APPLE__     
    if(setsockopt(sock, SOL_SOCKET, SOCK_NONBLOCK, &set, sizeof(set)) < 0)
    {
      perror("Failed to set SOCK_NOBBLOCK");
+     log_message(mission_report, 'e', "Failed to set SOCK_NOBBLOCK");
    }
 #endif
    memset(&sk_addr, 0, sizeof(sk_addr));
@@ -111,6 +138,7 @@ int open_sock(int port_nr){
    if(bind(sock, (struct sockaddr *)&sk_addr, sizeof(sk_addr)) < 0)
    {
       perror("Failed to bind to socket:");
+      log_message(mission_report, 'e', "Failed to bind to socket");
       return(-1);
    }
    else
@@ -123,6 +151,7 @@ void closeClient(int clientSocket, std::vector<pollfd>& autobots)
 {
 
     printf("[ACTION] Closing client socket: %d\n", clientSocket);
+    log_message(mission_report, 'a', "Closing client socket: " + std::to_string(clientSocket));
 
      // If this client's socket is maxfds then the next lowest
      // one has to be determined. Socket fd's can be reused by the Kernel,
@@ -147,6 +176,7 @@ void sendMessage(std::string client_name, std::string send_message, int socket =
     }
     else{
         std::cout << "[ERROR] NOT FOUND CONNECTION FOR SENDING\n";
+        log_message(mission_report, 'e', "NOT FOUND CONNECTION FOR SENDING");
         return;
     }
         uint8_t SOH = 0x01;
@@ -163,6 +193,7 @@ void sendMessage(std::string client_name, std::string send_message, int socket =
         message.insert(message.end(), command.begin(), command.end());
         message.push_back(static_cast<char>(ETX));
         std::cout << "[ACTION] SENDING: " << client_name << " A MESSAGE\n";
+        log_message(mission_report, 'a', "SENDING: " + client_name + " A MESSAGE");
         int result = send(send_socket, message.data(), message.size(), 0);
     // TODO: ERROR HANDLING
 }
@@ -170,13 +201,16 @@ void sendMessage(std::string client_name, std::string send_message, int socket =
 int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
     int connectSock = socket(AF_INET, SOCK_STREAM, 0);
     std::cout << "[INFO] ATTEMPTING TO CONNECT TO " << victim.name << "\n";
+    log_message(mission_report, 'i', "ATTEMPTING TO CONNECT TO " + victim.name);
     if(connectSock < 0){
         perror("Failed to create client socket");
+        log_message(mission_report, 'e', "Failed to create client socket");
         return -1;
     }
 
     if (connectSock == -1){
         std::cout << "[ERROR] opening connect sock\n";
+        log_message(mission_report, 'e', "opening connect sock");
         return -1;
     }
 
@@ -192,6 +226,7 @@ int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
         victim.port = 4000 + stoi(id);
     }
     std::cout << "                PORT " << victim.port << "\n";
+    log_message(mission_report, 'i', "PORT: " + victim.port);
     server_addr.sin_port = htons(victim.port);
 
     if (victim.port == 4067 || victim.port > 5500 || victim.port < 4000){
@@ -200,6 +235,7 @@ int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
 
     if (connect(connectSock, (sockaddr*) &server_addr, sizeof(server_addr)) < 0){
         std::cout << "[ERROR] Initial connection sock\n";
+        log_message(mission_report, 'e', "Initial connection sock");
         return 0;
     }
     victim.socket = connectSock;
@@ -217,6 +253,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
 
     if (find(clientSocketList.begin(), clientSocketList.end(), clientSocket) != clientSocketList.end()){
         std::cout << "[INFO] COMMAND FROM OUR CLIENT (NOT SERVER)\n";
+        log_message(mission_report, 'i', "COMMAND FROM OUR CLIENT (NOT SERVER");
         std::string msg(buffer);
         if (msg.find("SENDMSG") != std::string::npos){
             std::string cur_message;
@@ -235,6 +272,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             }
 
             std::cout << "[ACTION] Sending message: " << cur_message << " TO " << group_str << "\n";
+            log_message(mission_report, 'a', "Sending message: " + cur_message + " TO " + group_str);
 
             if (one_hop_connections.find(group_str) != one_hop_connections.end()){
                 std::string send_str = "SENDMSG," + group_str + ",A5_67," + cur_message;
@@ -243,6 +281,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             }
 
             std::cout << "[INFO]   RECIPIENT NOT FOUND IN ONE HOP CONNECTIONS, ADDING MESSAGE TO QUEUE\n";
+            log_message(mission_report, 'i', "RECIPIENT NOT FOUND IN ONE HOP CONNECTIONS, ADDING MESSAGE TO QUEUE");
 
             messageStruct new_message;
             new_message.from_name = "A5_67";
@@ -258,6 +297,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             int nsent = send(clientSocket, reply.c_str(), reply.size(), 0);
             if (nsent == -1){
                 std::cout << "[ERROR] FAILED TO SEND REPLY TO CLIENT\n";
+                log_message(mission_report, 'e', "FAILED TO SEND REPLY TO CLIENT");
             }
             return;
         }
@@ -268,15 +308,18 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             }
             if(message_queues["A5_67"].empty()){
                 std::cout << "[INFO]   NO NEW MESSAGES\n";
+                log_message(mission_report, 'i', "NO NEW MESSAGES");
                 reply = "NO NEW MESSAGES ON SERVER";
             } else {
                 std::cout << "[ACTION] Showing oldest message: " << message_queues["A5_67"].front().message_data << "\n";
+                log_message(mission_report, 'a', "Showing oldest message: " + message_queues["A5_67"].front().message_data);
                 reply = "[" + message_queues["A5_67"].front().from_name +  "] " + message_queues["A5_67"].front().message_data;
                 message_queues["A5_67"].pop_front();
             }
             int nsent = send(clientSocket, reply.c_str(), reply.size(), 0);
             if (nsent == -1){
                 std::cout << "[ERROR] FAILED TO SEND REPLY TO CLIENT\n";
+                log_message(mission_report, 'e', "FAILED TO SEND REPLY TO CLIENT");
             }
             return;
         }
@@ -297,6 +340,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             int nsent = send(clientSocket, reply.c_str(), reply.size(), 0);
             if (nsent == -1){
                 std::cout << "[ERROR] FAILED TO SEND REPLY TO CLIENT\n";
+                log_message(mission_report, 'e', "FAILED TO SEND REPLY TO CLIENT");
             }
             return;
         }
@@ -304,8 +348,10 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
 
         int total_len = 0;
         std::cout << "[ACTION] DOING CLIENT COMMAND\n";
+        log_message(mission_report, 'a', "DOING CLIENT COMMAND");
         if (recieved < 5) { // minimum frame size
             std::cout << "[ERROR] Command too short\n";
+            log_message(mission_report, 'e', "Command too short");
             return;
         }
 
@@ -315,23 +361,30 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             uint16_t msg_len = ntohs(netlen);
 
             std::cout << "[INFO]   recieved message has a length of: " << msg_len << "\n";
+            log_message(mission_report, 'i', "recieved message has a length of: " +  msg_len);
 
             std::string message;
             message.insert(message.end(), buffer + total_len, buffer + total_len + msg_len);
 
-            // now you can sanity-check
             if (msg_len > (uint16_t)recieved) {
 
                 std::cout << "[ERROR] incomplete frame: declared " << msg_len << " got " << recieved << "\n";
+                log_message(mission_report, 'e', "[ERROR] incomplete frame: declared " + std::to_string(msg_len) + " got " + std::to_string(recieved));
                 std::cout << "[INFO]   The Buffer(hex): ";
+                std::string buffer_str;
                 for (int i = total_len; i < recieved; i++) {
                     unsigned char c = buffer[i];
-                    if (isprint(c))
+                    if (isprint(c)){
                         std::cout << c;
-                    else
+                        buffer_str += c;
+                    }
+                    else{
                         std::cout << "\\x" << std::hex << (int)c << std::dec;
+                        buffer_str += "\\x" + int(c);
+                    }
                 }
-                std::cout << "\n"; 
+                std::cout << "\n";
+                log_message(mission_report, 'i', "The Buffer(hex): " + buffer_str);
                 return;
             }
 
@@ -342,9 +395,12 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 command_prefix = "HELO";
                 found = true;
                 std::cout << "[ACTION] DOING HELO\n";
+                log_message(mission_report, 'a', "Doing HELO");
                 std::string group_name_str = "";
                 group_name_str.insert(group_name_str.end(), buffer+total_len+9, buffer + total_len + msg_len-1);
                 std::cout << "[INFO]   The current group name: " << group_name_str << "\n";
+                log_message(mission_report, 'i', "The current group name: " + group_name_str);
+                
                 
                 if(known_servers.find(group_name_str) != known_servers.end()){
                     one_hop_connections[group_name_str] = known_servers[group_name_str];
@@ -374,9 +430,11 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                     send_str += std::to_string(one_hopper.second.port) + ";";
                 }
                 std::cout << "[INFO]   The send string: " << send_str << "\n";
+                log_message(mission_report, 'i', "The send string: " + send_str);
                 sendMessage(group_name_str, send_str);
             } 
             else if (message.rfind("KEEPALIVE") != -1){
+                log_message(mission_report, 'a', "Doing KEEPALIVE");
                 command_prefix = "KEEPALIVE";
                 found = true;
             } 
@@ -384,6 +442,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 command_prefix = "GETMSGS";
                 found = true;
                 std::cout << "[ACTION] DOING GETMSGS\n";
+                log_message(mission_report, 'a', "Doing GETMSGS");
                 bool exists = false;
                 serverConnection recipient;
                 for (auto& recipient_check : one_hop_connections){
@@ -406,8 +465,10 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 found = true;
 
                 std::cout << "[ACTION] DOING SENDMSG\n";
+                log_message(mission_report, 'a', "Doing SENDMSG");
                 
                 std::cout << "[INFO]   The message: "<< message << "\n";
+                log_message(mission_report, 'i', "The message: "+ message);
 
                 messageStruct new_message;
                 std::string building_message = "";
@@ -415,17 +476,20 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 std::string send_message_to = "";
                 std::string send_message_from = "";
                 std::cout << "[INFO] PARSING SEND MESSAGE STRING: " << building_message << " ";
+                log_message(mission_report, 'i', "PARSING SEND MESSAGE STRING: " + building_message);
                 for (int i = 11; i < msg_len; i++)
                 {
                     if (message[i] == ',' && checks < 3){
                         if(checks == 1){
                             send_message_to = building_message;
                             std::cout << "SENDING MESSAGE TO: " << send_message_to << " ";
+                            log_message(mission_report, 'a', "SENDING MESSAGE TO: " + send_message_to);
                             building_message = "";
                         }
                         else if (checks == 2){
                             send_message_from = building_message;
-                            std::cout << "SENDING MESSAGE FROM: " << send_message_from<< " ";  
+                            std::cout << "SENDING MESSAGE FROM: " << send_message_from<< " ";
+                            log_message(mission_report, 'a', "SENDING MESSAGE FROM: " + send_message_from);
                             building_message = "";
                         }
                         checks += 1;
@@ -436,6 +500,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                     }
                 }
                 std::cout << "THE MESSAGE DATA: " << building_message << "\n";
+                log_message(mission_report, 'i', "THE MESSAGE DATA: " + building_message);
                 new_message.from_name = send_message_from;
                 new_message.to_name = send_message_to;
                 new_message.message_data = building_message;
@@ -472,6 +537,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 }
                 send_str = "STATUSRESP," + send_str;
                 std::cout << "[ACTION] Sending statusresp, the message is: " << send_str << "\n";
+                log_message(mission_report, 'a', "Sending statusresp, the message is: " + send_str);
                 sendMessage("", send_str, clientSocket=clientSocket);
                 command_prefix = "STATUSREQ";
 
@@ -483,9 +549,10 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 found = true;
 
                 std::cout << "[ACTION] DOING SERVER\n";
+                log_message(mission_report, 'a', "Doing SERVER");
                 
-                std::cout << "[INFO]   The message: "<< message << "\n";
-
+                std::cout << "[INFO]   The message: "<< message << "\n"; 
+                log_message(mission_report, 'i', "The message: " + message);
                 int index = 12;
                 int cur_part = 0;
                 std::string current_server = "";
@@ -494,6 +561,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                     if(message[index] == ';'){
                         current_connection.port = std::stoi(current_server);
                         std::cout << "PORT: " << current_server << " ";
+                        log_message(mission_report, 'i', "PORT: " + current_server);
                         current_server = "";
                         if(one_hop_connections.find(current_connection.name) != one_hop_connections.end()){
                             std::string lookup_name = current_connection.name;
@@ -509,6 +577,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                                 int result = connectToServer(current_connection, autobots);
                                 if (result == -1){
                                     std::cout << "[ERROR] Failed to connect to server\n";
+                                    log_message(mission_report, 'e', "Failed to connect to server");
                                 }
                             }
                         }
@@ -522,11 +591,13 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                         if(cur_part == 0){
                             current_connection.name = current_server;
                             std::cout << "[INFO]   NAME: " << current_server << " ";
+                            log_message(mission_report, 'i', "NAME: " + current_server);
                             current_server = "";
                         }
                         else if(cur_part == 1){
                             current_connection.addr = current_server;
                             std::cout << "IP: " << current_server << " ";
+                            log_message(mission_report, 'i', "IP: " + current_server);
                             current_server = "";
                         }
                         cur_part += 1;
@@ -543,6 +614,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 found = true;
             } 
             std::cout << "[INFO]   The current command prefix: " << command_prefix << "\n";
+            log_message(mission_report, 'i', "The current comman prefix: " + command_prefix);
             if(found == false){
                 //std::cout << "Unrecognized command prefix";
                 return;
@@ -550,7 +622,6 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             total_len += msg_len;
     }
 }
-
 int main(int argc, char const *argv[])
 {
 
@@ -570,6 +641,10 @@ int main(int argc, char const *argv[])
         std::cout << "[ERROR] Incorrect number of arguments\n";
         return 0;
     }
+
+    log_message(mission_report, 'i', "START OF LOG");
+
+
     int port = atoi(argv[1]);   
     const char* address = argv[2]; //130.208.246.98
     int connect_port = atoi(argv[3]);
@@ -578,11 +653,13 @@ int main(int argc, char const *argv[])
 
     if (listenSock == -1){
         std::cout << "[ERROR] Opening listen sock\n";
+        log_message(mission_report, 'e', "Opening listen sock");
         return 0;
     }
 
     if(listen(listenSock, MAX_BACKLOG) < 0){
         printf("Listen failed on port %s\n", argv[1]);
+        log_message(mission_report, 'e', "Listen failed on port");
         exit(0);
     }
     else {
@@ -593,11 +670,13 @@ int main(int argc, char const *argv[])
     int connectSock = socket(AF_INET, SOCK_STREAM, 0);
     if(connectSock < 0){
         perror("Failed to create client socket");
+        log_message(mission_report, 'e', "Failed to create client socket");
         return 0;
     }
 
     if (connectSock == -1){
         std::cout << "[ERROR] opening connect sock\n";
+        log_message(mission_report, 'e', "Opening connect sock");
         return 0;
     }
 
@@ -611,6 +690,7 @@ int main(int argc, char const *argv[])
 
     if (connect(connectSock, (sockaddr*) &server_addr, sizeof(server_addr)) < 0){
         std::cout << "[ERROR] Initial connection sock\n";
+        log_message(mission_report, 'e', "Initial connection sock");
         return 0;
     }
     pollfd temp{.fd=connectSock, .events=POLLIN, .revents=0};
@@ -633,9 +713,8 @@ int main(int argc, char const *argv[])
     message.push_back(static_cast<char>(ETX));
     int sendtest = send(connectSock, message.data(), message.size(), 0);
 
-    std::cout << sendtest << "\n";
-
     std::cout << "[ACTION] starting loop\n";
+    log_message(mission_report, 'a', "Starting loop!");
     auto start = std::chrono::high_resolution_clock::now();
     while(!finished){
         int n = poll(autobots.data(), autobots.size(), 500);
@@ -644,6 +723,7 @@ int main(int argc, char const *argv[])
         auto time_passed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now() - start);
         if (time_passed.count() >= 65){
             std::cout << "[ACTION] SENDING KEEPALIVES NOW NOW NOW\n";
+            log_message(mission_report, 'a', "Sending keepalives");
             start = std::chrono::high_resolution_clock::now();
             for (auto& connection : one_hop_connections){
                 serverConnection recipient = connection.second;
@@ -671,6 +751,7 @@ int main(int argc, char const *argv[])
 
         if (n < 0){
             perror("poll failed - closing down\n");
+            log_message(mission_report, 'e', "Poll failed - closing down");
             finished = true;
         }
         else{
@@ -686,6 +767,7 @@ int main(int argc, char const *argv[])
                         clients[clientSock] = new Client(clientSock);
                         n--;
                         printf("Client connected on server: %d\n", clientSock); //TODO: SEND HELO
+                        log_message(mission_report, 'i', "Client connected on server " + std::to_string(clientSock));
                         sendMessage("", "HELO,67", clientSock);
                     }
                     break;
@@ -704,6 +786,7 @@ int main(int argc, char const *argv[])
 
                         if (check_fd.fd == client->sock){
                             std::cout << "[INFO]   FOUND SOCKET\n";
+                            log_message(mission_report, 'i', "Found socket");
                             {
                                 // recv() == 0 means client has closed connection
                                 if(check_fd.revents & POLLHUP)
@@ -717,11 +800,13 @@ int main(int argc, char const *argv[])
                                 else if (check_fd.revents & POLLIN)
                                 {
                                     std::cout << "[INFO]   RECIEVING\n";
+                                    log_message(mission_report, 'i', "Recieving");
                                     int recieved = recv(client->sock, buffer, sizeof(buffer), 0);
 
                                     if (recieved == 0)
                                     {
                                         std::cout << "[INFO]   Peer closed connection\n";
+                                        log_message(mission_report, 'i', "Peer closed connection");
                                         disconnectedClients.push_back(client);
                                         closeClient(client->sock, autobots);
                                         check_fd.revents = 0;
@@ -729,19 +814,25 @@ int main(int argc, char const *argv[])
                                     }
 
                                     std::cout << "[INFO]   The Buffer(hex): ";
+                                    log_message(mission_report, 'i', "The buffer(hex)");
+                                    std::string buffer_str;
                                     for (int i = 0; i < recieved; i++) {
                                         unsigned char c = buffer[i];
-                                        if (isprint(c))
+                                        if (isprint(c)){
                                             std::cout << c;
-                                        else
+                                            buffer_str += c;
+                                        }else{
                                             std::cout << "\\x" << std::hex << (int)c << std::dec;
-                                    }
+                                            buffer_str += "\\x" + int(c);
+                                        }}
                                     std::cout << "\n"; 
+                                    log_message(mission_report, 'i', buffer_str);
                                     clientCommand(client->sock, autobots, buffer, recieved);
                                     check_fd.revents = 0;
-                                }
+                                    }
                                 else{
                                     std::cout << "[ERROR] Unknown poll event on socket " << check_fd.fd << "\n";
+                                    log_message(mission_report, 'e', "Unknown poll event on socket");
                                 }
                             }
                         }
