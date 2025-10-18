@@ -51,6 +51,8 @@ class Client
 struct serverConnection{
     std::string name;
     std::string addr;
+    std::vector<char> buffer;
+    int recieved;
     int port; 
     int socket;
 };
@@ -68,6 +70,7 @@ std::map<std::string, std::deque<messageStruct> > message_queues;
 std::vector<int> clientSocketList; // LIST OF SOCKETS THAT ARE NOT SERVERS
 // TODO: HARDCODED CHANGE LATER
 std::string TSAM_IP = "130.208.246.98";
+std::vector<int> BANNED_PORTS = {4026, 5044, 4005, 4013, 4030};
 const char *path="mission_report";
 std::ofstream mission_report(path);
 
@@ -229,6 +232,13 @@ int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
     log_message(mission_report, 'i', "PORT: " + victim.port);
     server_addr.sin_port = htons(victim.port);
 
+    for(int port : BANNED_PORTS){
+        if(victim.port == port){
+            std::cout << "[INFO] Port " << port << " is BANNED, skipping connection\n";
+            return -1;
+        }
+    }
+
     if (victim.port == 4067 || victim.port > 5500 || victim.port < 4000){
         return -1;
     }
@@ -247,6 +257,16 @@ int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
     std::string command = "HELO,A5_67";
     sendMessage(victim.name, command, connectSock);
     return connectSock;
+}
+
+serverConnection findConnectionBySocket(int socket){
+    for (auto const& connection : one_hop_connections)
+    {
+        if (connection.second.socket == socket){
+            return connection.second;
+        }
+    }
+    return serverConnection();
 }
 
 void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer, int recieved){
@@ -336,7 +356,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 }
             }
             std::cout << "[ACTION] LISTING SERVERS: " << all_servers << "\n";
-            std::string reply = all_servers;
+            std::string reply = all_servers;  // <-- MISSING SEMICOLON WAS HERE
             int nsent = send(clientSocket, reply.c_str(), reply.size(), 0);
             if (nsent == -1){
                 std::cout << "[ERROR] FAILED TO SEND REPLY TO CLIENT\n";
@@ -344,96 +364,135 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             }
             return;
         }
+        return;
     }
 
-        int total_len = 0;
-        std::cout << "[ACTION] DOING CLIENT COMMAND\n";
+    // Server command handling
+    int total_len = 0;
+    serverConnection cur_connection = findConnectionBySocket(clientSocket); 
+    
+    // Prepend any buffered data
+    std::vector<char> full_buffer;
+    if (cur_connection.recieved > 0){
+        full_buffer.insert(full_buffer.end(), cur_connection.buffer.begin(), cur_connection.buffer.end());
+        cur_connection.recieved = 0;
+        std::cout << "[ACTION] FETCHING OLD UNFINISHED DATA\n";
+        std::cout << "[INFO] " << full_buffer.size() << " AMOUNT OF DATA WAS FETCHED\n";
+    }
+    full_buffer.insert(full_buffer.end(), buffer, buffer + recieved);
+
+    std::cout << "[ACTION] DOING CLIENT COMMAND\n";
         log_message(mission_report, 'a', "DOING CLIENT COMMAND");
-        if (recieved < 5) { // minimum frame size
-            std::cout << "[ERROR] Command too short\n";
+    if (full_buffer.size() < 5) { // minimum frame size
+        std::cout << "[ERROR] Command too short\n";
             log_message(mission_report, 'e', "Command too short");
+        return;
+    }
+
+    while (total_len < full_buffer.size()){
+        uint16_t netlen;
+        memcpy(&netlen, full_buffer.data() + total_len + 1, sizeof(netlen));
+        uint16_t msg_len = ntohs(netlen);
+        
+        if (msg_len + total_len > full_buffer.size()){
+            // Store incomplete frame
+            cur_connection.buffer.clear();
+            cur_connection.buffer.insert(cur_connection.buffer.end(), 
+                                        full_buffer.begin() + total_len, 
+                                        full_buffer.end());
+            cur_connection.recieved = full_buffer.size() - total_len;
+            std::cout << "[ACTION] UNFINISHED DATA, SAVING AND MOVING ON\n";
             return;
         }
 
-        while (total_len < recieved){
-            uint16_t netlen;
-            memcpy(&netlen, buffer + total_len + 1, sizeof(netlen));
-            uint16_t msg_len = ntohs(netlen);
-
-            std::cout << "[INFO]   recieved message has a length of: " << msg_len << "\n";
+        std::cout << "[INFO]   recieved message has a length of: " << msg_len << "\n";
             log_message(mission_report, 'i', "recieved message has a length of: " +  msg_len);
 
-            std::string message;
-            message.insert(message.end(), buffer + total_len, buffer + total_len + msg_len);
+        std::string message;
+        message.insert(message.end(), full_buffer.begin() + total_len, full_buffer.begin() + total_len + msg_len);
 
-            if (msg_len > (uint16_t)recieved) {
-
-                std::cout << "[ERROR] incomplete frame: declared " << msg_len << " got " << recieved << "\n";
-                log_message(mission_report, 'e', "[ERROR] incomplete frame: declared " + std::to_string(msg_len) + " got " + std::to_string(recieved));
-                std::cout << "[INFO]   The Buffer(hex): ";
-                std::string buffer_str;
-                for (int i = total_len; i < recieved; i++) {
-                    unsigned char c = buffer[i];
-                    if (isprint(c)){
-                        std::cout << c;
-                        buffer_str += c;
-                    }
-                    else{
-                        std::cout << "\\x" << std::hex << (int)c << std::dec;
-                        buffer_str += "\\x" + int(c);
-                    }
-                }
-                std::cout << "\n";
-                log_message(mission_report, 'i', "The Buffer(hex): " + buffer_str);
-                return;
+        // now you can sanity-check
+        if (msg_len > (uint16_t)full_buffer.size()) {
+            std::cout << "[ERROR] incomplete frame: declared " << msg_len << " got " << full_buffer.size() << "\n";
+            std::cout << "[INFO]   The Buffer(hex): ";
+            for (size_t i = total_len; i < full_buffer.size(); i++) {
+                unsigned char c = full_buffer[i];
+                if (isprint(c))
+                    std::cout << c;
+                else
+                    std::cout << "\\x" << std::hex << (int)c << std::dec;
             }
+            std::cout << "\n"; 
+            return;
+        }
 
-            std::string command_prefix = "";
-            bool found = false;
-            
-            if (message.rfind("HELO") != -1){
-                command_prefix = "HELO";
-                found = true;
-                std::cout << "[ACTION] DOING HELO\n";
+        std::string command_prefix = "";
+        bool found = false;
+        
+        if (message.find("HELO") != std::string::npos){
+            command_prefix = "HELO";
+            found = true;
+            std::cout << "[ACTION] DOING HELO\n";
                 log_message(mission_report, 'a', "Doing HELO");
-                std::string group_name_str = "";
-                group_name_str.insert(group_name_str.end(), buffer+total_len+9, buffer + total_len + msg_len-1);
-                std::cout << "[INFO]   The current group name: " << group_name_str << "\n";
+            std::string group_name_str = "";
+            group_name_str.insert(group_name_str.end(), full_buffer.begin() + total_len + 9, full_buffer.begin() + total_len + msg_len - 1);
+            std::cout << "[INFO]   The current group name: " << group_name_str << "\n";
                 log_message(mission_report, 'i', "The current group name: " + group_name_str);
                 
-                
-                if(known_servers.find(group_name_str) != known_servers.end()){
-                    one_hop_connections[group_name_str] = known_servers[group_name_str];
-                }
-                else{
-                    serverConnection temp={.name=group_name_str, .addr=TSAM_IP, .port=-1, .socket=clientSocket}; //TODO: FIX THE IP HARDCODE
-                    one_hop_connections[group_name_str] = temp;
-                }
-                if (message_queues.find(group_name_str) == message_queues.end()){
-                    message_queues[group_name_str] = {};
-                }
-                if(known_servers.find(group_name_str) == known_servers.end()){
-                    known_servers[group_name_str] = one_hop_connections[group_name_str];
-                }
+            
+            if(known_servers.find(group_name_str) != known_servers.end()){
+                one_hop_connections[group_name_str] = known_servers[group_name_str];
+            }
+            else{
+                serverConnection temp={.name=group_name_str, .addr=TSAM_IP, .port=-1, .socket=clientSocket};
+                one_hop_connections[group_name_str] = temp;
+            }
+            if (message_queues.find(group_name_str) == message_queues.end()){
+                message_queues[group_name_str] = {};
+            }
+            if(known_servers.find(group_name_str) == known_servers.end()){
+                known_servers[group_name_str] = one_hop_connections[group_name_str];
+            }
 
-                // REMOVE FROM CLIENT LIST, SINCE THIS IS A SERVER
-                auto client_index = find(clientSocketList.begin(), clientSocketList.end(), clientSocket);
-                if (client_index != clientSocketList.end()){
-                    clientSocketList.erase(client_index);
+            // REMOVE FROM CLIENT LIST, SINCE THIS IS A SERVER
+            auto client_index = find(clientSocketList.begin(), clientSocketList.end(), clientSocket);
+            if (client_index != clientSocketList.end()){
+                clientSocketList.erase(client_index);
+            }
+            
+            std::string send_str = "SERVERS,";
+            send_str += "A5_67," + TSAM_IP + ",4067;";
+            for (auto& one_hopper : one_hop_connections){
+                send_str += one_hopper.second.name + ",";
+                send_str += one_hopper.second.addr + std::string(",");
+                send_str += std::to_string(one_hopper.second.port) + ";";
+            }
+            std::cout << "[INFO]   The send string: " << send_str << "\n";
+                log_message(mission_report, 'i', "The send string: " + send_str);
+            sendMessage(group_name_str, send_str);
+        } 
+            else if (message.rfind("KEEPALIVE") != -1){
+                std::cout << "[ACTION] DOING KEEPALIVE WITH: " << message << " \n";
+                std::string message_len = "";
+                std::string TEST = "";
+                bool found = false;
+                for (int i = 0; i < msg_len-1; i++)
+                {
+                    if (found){
+                        message_len += message[i];
+                    }
+                    if (message[i] == ','){
+                        found = true;
+                    }
+                    TEST+=message[i];
+                }
+                std::cout << "[INFO] CONVERTING: " << message_len << " TO INT " << TEST<< "\n";
+                int message_len_int = std::stoi(message_len);
+                if(message_len_int > 0){
+                    std::cout << "[ACTION] SENDING GETMSGS\n";
+                    sendMessage("", "GETMSGS,A5_67", clientSocket);
                 }
                 
-                std::string send_str = "SERVERS,";
-                send_str += "A5_67," + TSAM_IP + ",4067;";
-                for (auto& one_hopper : one_hop_connections){
-                    send_str += one_hopper.second.name + ",";
-                    send_str += one_hopper.second.addr + std::string(",");
-                    send_str += std::to_string(one_hopper.second.port) + ";";
-                }
-                std::cout << "[INFO]   The send string: " << send_str << "\n";
-                log_message(mission_report, 'i', "The send string: " + send_str);
-                sendMessage(group_name_str, send_str);
-            } 
-            else if (message.rfind("KEEPALIVE") != -1){
                 log_message(mission_report, 'a', "Doing KEEPALIVE");
                 command_prefix = "KEEPALIVE";
                 found = true;
