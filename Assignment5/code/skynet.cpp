@@ -370,21 +370,21 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 std::string message_len = "";
                 std::string TEST = "";
                 bool found = false;
-                for (int i = 0; i < msg_len; i++)
+                for (int i = 0; i < msg_len-1; i++)
                 {
                     if (found){
                         message_len += message[i];
                     }
                     if (message[i] == ','){
-                        found == true;
+                        found = true;
                     }
                     TEST+=message[i];
                 }
                 std::cout << "[INFO] CONVERTING: " << message_len << " TO INT " << TEST<< "\n";
                 int message_len_int = std::stoi(message_len);
                 if(message_len_int > 0){
-                    std::cout << "[ACTION] SENDING GETMSG\n";
-                    sendMessage("", "GETMSG", clientSocket);
+                    std::cout << "[ACTION] SENDING GETMSGS\n";
+                    sendMessage("", "GETMSGS,A5_67", clientSocket);
                 }
                 
                 command_prefix = "KEEPALIVE";
