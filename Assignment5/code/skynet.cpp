@@ -500,30 +500,37 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             sendMessage(group_name_str, send_str);
         } 
             else if (message.rfind("KEEPALIVE") != -1){
-                std::cout << "[ACTION] DOING KEEPALIVE WITH: " << message << " \n";
-                std::string message_len = "";
-                std::string TEST = "";
-                bool found = false;
-                for (int i = 0; i < msg_len-1; i++)
-                {
-                    if (found){
-                        message_len += message[i];
+                try
+                    {
+                    std::cout << "[ACTION] DOING KEEPALIVE WITH: " << message << " \n";
+                    std::string message_len = "";
+                    std::string TEST = "";
+                    bool found = false;
+                    for (int i = 0; i < msg_len-1; i++)
+                    {
+                        if (found){
+                            message_len += message[i];
+                        }
+                        if (message[i] == ','){
+                            found = true;
+                        }
+                        TEST+=message[i];
                     }
-                    if (message[i] == ','){
-                        found = true;
+                    std::cout << "[INFO] CONVERTING: " << message_len << " TO INT " << TEST<< "\n";
+                    int message_len_int = std::stoi(message_len);
+                    if(message_len_int > 0){
+                        std::cout << "[ACTION] SENDING GETMSGS\n";
+                        sendMessage("", "GETMSGS,A5_67", clientSocket);
                     }
-                    TEST+=message[i];
+                    
+                    log_message(mission_report, 'a', "Doing KEEPALIVE");
+                    command_prefix = "KEEPALIVE";
+                    found = true;
                 }
-                std::cout << "[INFO] CONVERTING: " << message_len << " TO INT " << TEST<< "\n";
-                int message_len_int = std::stoi(message_len);
-                if(message_len_int > 0){
-                    std::cout << "[ACTION] SENDING GETMSGS\n";
-                    sendMessage("", "GETMSGS,A5_67", clientSocket);
+                catch(...){
+                    std::cout << "[ERROR] KEEPALIVE FAILED, CONTINUING\n";
+                    log_message(mission_report, 'e', "KEEPALIVE FAILED, CONTINUING");
                 }
-                
-                log_message(mission_report, 'a', "Doing KEEPALIVE");
-                command_prefix = "KEEPALIVE";
-                found = true;
             } 
             else if (message.rfind("GETMSGS") != -1){
                 command_prefix = "GETMSGS";
@@ -846,16 +853,18 @@ int main(int argc, char const *argv[])
             for(pollfd &bot : autobots){
                 if((int)bot.fd == listenSock){
                     if(bot.revents & POLLIN){
-                        clientSock = accept(listenSock, (struct sockaddr *)&client,&clientLen);
-                        pollfd temp{.fd=clientSock, .events=POLLIN, .revents=0};
-                        autobots.push_back(temp);
-                        clientSocketList.push_back(temp.fd);
-                        printf("accept***\n");
-                        clients[clientSock] = new Client(clientSock);
-                        n--;
-                        printf("Client connected on server: %d\n", clientSock); //TODO: SEND HELO
-                        log_message(mission_report, 'i', "Client connected on server " + std::to_string(clientSock));
-                        sendMessage("", "HELO,A5_67", clientSock);
+                        if(one_hop_connections.size() < MAX_BACKLOG){
+                            clientSock = accept(listenSock, (struct sockaddr *)&client,&clientLen);
+                            pollfd temp{.fd=clientSock, .events=POLLIN, .revents=0};
+                            autobots.push_back(temp);
+                            clientSocketList.push_back(temp.fd);
+                            printf("accept***\n");
+                            clients[clientSock] = new Client(clientSock);
+                            n--;
+                            printf("Client connected on server: %d\n", clientSock); //TODO: SEND HELO
+                            log_message(mission_report, 'i', "Client connected on server " + std::to_string(clientSock));
+                            sendMessage("", "HELO,A5_67", clientSock);
+                        }
                     }
                     break;
                 }
