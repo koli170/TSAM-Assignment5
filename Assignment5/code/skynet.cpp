@@ -70,7 +70,8 @@ std::map<std::string, std::deque<messageStruct> > message_queues;
 std::vector<int> clientSocketList; // LIST OF SOCKETS THAT ARE NOT SERVERS
 // TODO: HARDCODED CHANGE LATER
 std::string TSAM_IP = "130.208.246.98";
-std::vector<int> BANNED_PORTS = {4026, 5044, 4005, 4013, 4030};
+//std::vector<int> BANNED_PORTS = {4026, 5044, 4005, 4013, 4030, 4099};
+std::vector<int> BANNED_PORTS = {};
 const char *path="mission_report";
 std::ofstream mission_report(path);
 
@@ -259,15 +260,6 @@ int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
     return connectSock;
 }
 
-serverConnection findConnectionBySocket(int socket){
-    for (auto const& connection : one_hop_connections)
-    {
-        if (connection.second.socket == socket){
-            return connection.second;
-        }
-    }
-    return serverConnection();
-}
 
 void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer, int recieved){
 
@@ -366,50 +358,94 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
         }
         return;
     }
-
-    // Server command handling
     int total_len = 0;
-    serverConnection cur_connection = findConnectionBySocket(clientSocket); 
     
-    // Prepend any buffered data
+    // Build full buffer first
     std::vector<char> full_buffer;
-    if (cur_connection.recieved > 0){
-        full_buffer.insert(full_buffer.end(), cur_connection.buffer.begin(), cur_connection.buffer.end());
-        cur_connection.recieved = 0;
+    
+    // Try to find existing connection
+    serverConnection* cur_connection_ptr = nullptr;
+    for (auto& connection : one_hop_connections) {
+        if (connection.second.socket == clientSocket) {
+            cur_connection_ptr = &connection.second;
+            break;
+        }
+    }
+    
+    // Only fetch old data if connection exists
+    if (cur_connection_ptr != nullptr && cur_connection_ptr->recieved > 0){
+        full_buffer.insert(full_buffer.end(), cur_connection_ptr->buffer.begin(), cur_connection_ptr->buffer.end());
+        cur_connection_ptr->recieved = 0;
+        cur_connection_ptr->buffer.clear();
         std::cout << "[ACTION] FETCHING OLD UNFINISHED DATA\n";
         std::cout << "[INFO] " << full_buffer.size() << " AMOUNT OF DATA WAS FETCHED\n";
     }
+    
     full_buffer.insert(full_buffer.end(), buffer, buffer + recieved);
 
-    std::cout << "[ACTION] DOING CLIENT COMMAND\n";
-        log_message(mission_report, 'a', "DOING CLIENT COMMAND");
-    if (full_buffer.size() < 5) { // minimum frame size
+    std::cout << "[ACTION] DOING SERVER COMMAND\n";
+    log_message(mission_report, 'a', "DOING SERVER COMMAND");
+    
+    if (full_buffer.size() < 5) {
         std::cout << "[ERROR] Command too short\n";
-            log_message(mission_report, 'e', "Command too short");
+        log_message(mission_report, 'e', "Command too short");
         return;
     }
 
-    while (total_len < full_buffer.size()){
-        uint16_t netlen;
-        memcpy(&netlen, full_buffer.data() + total_len + 1, sizeof(netlen));
-        uint16_t msg_len = ntohs(netlen);
-        
-        if (msg_len + total_len > full_buffer.size()){
-            // Store incomplete frame
-            cur_connection.buffer.clear();
-            cur_connection.buffer.insert(cur_connection.buffer.end(), 
-                                        full_buffer.begin() + total_len, 
-                                        full_buffer.end());
-            cur_connection.recieved = full_buffer.size() - total_len;
-            std::cout << "[ACTION] UNFINISHED DATA, SAVING AND MOVING ON\n";
+    while (total_len < (int)full_buffer.size()) {
+        if (total_len + 3 > (int)full_buffer.size()) {
+            // need at least SOH + 2 length bytes + STX (we require header bytes present)
+            // save remaining partial header for next recv
+            for (auto &connection : one_hop_connections) {
+                if (connection.second.socket == clientSocket) {
+                    connection.second.buffer.clear();
+                    connection.second.buffer.insert(connection.second.buffer.end(),
+                                                full_buffer.begin() + total_len,
+                                                full_buffer.end());
+                    connection.second.recieved = full_buffer.size() - total_len;
+                    std::cout << "[ACTION] PARTIAL HEADER, SAVING AND MOVING ON\n";
+                    break;
+                }
+            }
             return;
         }
 
-        std::cout << "[INFO]   recieved message has a length of: " << msg_len << "\n";
-            log_message(mission_report, 'i', "recieved message has a length of: " +  msg_len);
+        // Read 2-byte length in network byte order and convert to host order
+        uint16_t net_len = 0;
+        memcpy(&net_len, full_buffer.data() + total_len + 1, sizeof(net_len));
+        uint16_t msg_len = ntohs(net_len); // <-- CORRECT: convert to host byte order
 
+        // Sanity: msg_len must be at least the header size we expect (SOH + len(2) + STX + ETX)
+        const uint16_t MIN_FRAME = 1 + 2 + 1 + 0 + 1;
+        if (msg_len < MIN_FRAME) {
+            std::cerr << "[ERROR] declared msg_len too small: " << msg_len << "\n";
+            return;
+        }
+
+        // Now check we have the whole frame buffered
+        if ((int)msg_len + total_len > (int)full_buffer.size()) {
+            // save remainder for next recv
+            for (auto &connection : one_hop_connections) {
+                if (connection.second.socket == clientSocket) {
+                    connection.second.buffer.clear();
+                    connection.second.buffer.insert(connection.second.buffer.end(),
+                                                full_buffer.begin() + total_len,
+                                                full_buffer.end());
+                    connection.second.recieved = full_buffer.size() - total_len;
+                    std::cout << "[ACTION] UNFINISHED DATA, SAVING AND MOVING ON\n";
+                    break;
+                }
+            }
+            return;
+        }
+
+        std::cout << "[INFO]   received message has a length of: " << msg_len << "\n";
+
+        // Extract the whole frame (header + payload + trailer) into 'message'
         std::string message;
-        message.insert(message.end(), full_buffer.begin() + total_len, full_buffer.begin() + total_len + msg_len);
+        message.insert(message.end(),
+            full_buffer.begin() + total_len,
+            full_buffer.begin() + total_len + msg_len);
 
         // now you can sanity-check
         if (msg_len > (uint16_t)full_buffer.size()) {
@@ -452,6 +488,14 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             }
             if(known_servers.find(group_name_str) == known_servers.end()){
                 known_servers[group_name_str] = one_hop_connections[group_name_str];
+            }
+            if (cur_connection_ptr == nullptr) {
+                for (auto& connection : one_hop_connections) {
+                    if (connection.second.socket == clientSocket) {
+                        cur_connection_ptr = &connection.second;
+                        break;
+                    }
+                }
             }
 
             // REMOVE FROM CLIENT LIST, SINCE THIS IS A SERVER
@@ -827,7 +871,7 @@ int main(int argc, char const *argv[])
                         n--;
                         printf("Client connected on server: %d\n", clientSock); //TODO: SEND HELO
                         log_message(mission_report, 'i', "Client connected on server " + std::to_string(clientSock));
-                        sendMessage("", "HELO,67", clientSock);
+                        sendMessage("", "HELO,A5_67", clientSock);
                     }
                     break;
                 }
