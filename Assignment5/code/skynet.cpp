@@ -850,13 +850,19 @@ int main(int argc, char const *argv[])
         }
         else{
             //std::cout << n << " new events\n";
+            std::vector<pollfd> autobots_to_add;
             for(pollfd &bot : autobots){
                 if((int)bot.fd == listenSock){
                     if(bot.revents & POLLIN){
-                        if(one_hop_connections.size() < MAX_BACKLOG){
+                        if(one_hop_connections.size() + autobots_to_add.size() < MAX_BACKLOG){
                             clientSock = accept(listenSock, (struct sockaddr *)&client,&clientLen);
+                            if (clientSock == -1){
+                                std::cout << "[ERROR] Unable to accept connection\n";
+                                log_message(mission_report, 'e', "Unable to accept connection");
+                                continue;
+                            }
                             pollfd temp{.fd=clientSock, .events=POLLIN, .revents=0};
-                            autobots.push_back(temp);
+                            autobots_to_add.push_back(temp);
                             clientSocketList.push_back(temp.fd);
                             printf("accept***\n");
                             clients[clientSock] = new Client(clientSock);
@@ -869,6 +875,11 @@ int main(int argc, char const *argv[])
                     break;
                 }
             }
+
+            for (pollfd &bot : autobots_to_add){
+                autobots.push_back(bot);
+            }
+            autobots_to_add.clear();
 
                 // Now check for commands from clients
                 std::vector<Client *> disconnectedClients;  
