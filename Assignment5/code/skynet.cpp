@@ -71,7 +71,7 @@ std::vector<int> clientSocketList; // LIST OF SOCKETS THAT ARE NOT SERVERS
 // TODO: HARDCODED CHANGE LATER
 std::string TSAM_IP = "130.208.246.98";
 //std::vector<int> BANNED_PORTS = {4026, 5044, 4005, 4013, 4030, 4099};
-std::vector<int> BANNED_PORTS = {};
+std::vector<int> BANNED_PORTS = {4030, 4130, 60908, 4015};
 const char *path="mission_report";
 std::ofstream mission_report(path);
 
@@ -199,6 +199,8 @@ void sendMessage(std::string client_name, std::string send_message, int socket =
         std::cout << "[ACTION] SENDING: " << client_name << " A MESSAGE\n";
         log_message(mission_report, 'a', "SENDING: " + client_name + " A MESSAGE");
         int result = send(send_socket, message.data(), message.size(), 0);
+        std::cout << result << "\n";
+        std::cout << message.data() << "\n";
     // TODO: ERROR HANDLING
 }
 
@@ -359,11 +361,10 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
         return;
     }
     int total_len = 0;
-    
-    // Build full buffer first
+
     std::vector<char> full_buffer;
     
-    // Try to find existing connection
+
     serverConnection* cur_connection_ptr = nullptr;
     for (auto& connection : one_hop_connections) {
         if (connection.second.socket == clientSocket) {
@@ -372,7 +373,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
         }
     }
     
-    // Only fetch old data if connection exists
+
     if (cur_connection_ptr != nullptr && cur_connection_ptr->recieved > 0){
         full_buffer.insert(full_buffer.end(), cur_connection_ptr->buffer.begin(), cur_connection_ptr->buffer.end());
         cur_connection_ptr->recieved = 0;
@@ -394,8 +395,6 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
 
     while (total_len < (int)full_buffer.size()) {
         if (total_len + 3 > (int)full_buffer.size()) {
-            // need at least SOH + 2 length bytes + STX (we require header bytes present)
-            // save remaining partial header for next recv
             for (auto &connection : one_hop_connections) {
                 if (connection.second.socket == clientSocket) {
                     connection.second.buffer.clear();
@@ -410,21 +409,17 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             return;
         }
 
-        // Read 2-byte length in network byte order and convert to host order
         uint16_t net_len = 0;
         memcpy(&net_len, full_buffer.data() + total_len + 1, sizeof(net_len));
-        uint16_t msg_len = ntohs(net_len); // <-- CORRECT: convert to host byte order
+        uint16_t msg_len = ntohs(net_len); 
 
-        // Sanity: msg_len must be at least the header size we expect (SOH + len(2) + STX + ETX)
         const uint16_t MIN_FRAME = 1 + 2 + 1 + 0 + 1;
         if (msg_len < MIN_FRAME) {
             std::cerr << "[ERROR] declared msg_len too small: " << msg_len << "\n";
             return;
         }
 
-        // Now check we have the whole frame buffered
         if ((int)msg_len + total_len > (int)full_buffer.size()) {
-            // save remainder for next recv
             for (auto &connection : one_hop_connections) {
                 if (connection.second.socket == clientSocket) {
                     connection.second.buffer.clear();
@@ -441,7 +436,6 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
 
         std::cout << "[INFO]   received message has a length of: " << msg_len << "\n";
 
-        // Extract the whole frame (header + payload + trailer) into 'message'
         std::string message;
         message.insert(message.end(),
             full_buffer.begin() + total_len,
@@ -474,20 +468,10 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             group_name_str.insert(group_name_str.end(), full_buffer.begin() + total_len + 9, full_buffer.begin() + total_len + msg_len - 1);
             std::cout << "[INFO]   The current group name: " << group_name_str << "\n";
                 log_message(mission_report, 'i', "The current group name: " + group_name_str);
-                
-            
-            if(known_servers.find(group_name_str) != known_servers.end()){
-                one_hop_connections[group_name_str] = known_servers[group_name_str];
-            }
-            else{
-                serverConnection temp={.name=group_name_str, .addr=TSAM_IP, .port=-1, .socket=clientSocket};
-                one_hop_connections[group_name_str] = temp;
-            }
+            serverConnection temp={.name=group_name_str, .addr=TSAM_IP, .port=-1, .socket=clientSocket};
+            one_hop_connections[group_name_str] = temp;
             if (message_queues.find(group_name_str) == message_queues.end()){
                 message_queues[group_name_str] = {};
-            }
-            if(known_servers.find(group_name_str) == known_servers.end()){
-                known_servers[group_name_str] = one_hop_connections[group_name_str];
             }
             if (cur_connection_ptr == nullptr) {
                 for (auto& connection : one_hop_connections) {
