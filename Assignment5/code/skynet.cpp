@@ -700,7 +700,7 @@ int main(int argc, char const *argv[])
         std::cout << "[ERROR] Incorrect number of arguments\n";
         return 0;
     }
-
+    mission_report.setf(std::ios::unitbuf);
     log_message(mission_report, 'i', "START OF LOG");
 
 
