@@ -71,7 +71,7 @@ std::vector<int> clientSocketList; // LIST OF SOCKETS THAT ARE NOT SERVERS
 // TODO: HARDCODED CHANGE LATER
 std::string TSAM_IP = "130.208.246.98";
 //std::vector<int> BANNED_PORTS = {4026, 5044, 4005, 4013, 4030, 4099};
-std::vector<int> BANNED_PORTS = {4030, 4130, 60908, 4015};
+std::vector<int> BANNED_PORTS = {4030, 4130, 60908, 4015, 4042, 4003, 4060};
 const char *path="mission_report";
 std::ofstream mission_report(path);
 
@@ -350,15 +350,20 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 }
             }
             std::cout << "[ACTION] LISTING SERVERS: " << all_servers << "\n";
+            log_message(mission_report, 'a', "LISTING SERVERS: " + all_servers);
             std::string reply = all_servers;  // <-- MISSING SEMICOLON WAS HERE
             int nsent = send(clientSocket, reply.c_str(), reply.size(), 0);
             if (nsent == -1){
                 std::cout << "[ERROR] FAILED TO SEND REPLY TO CLIENT\n";
                 log_message(mission_report, 'e', "FAILED TO SEND REPLY TO CLIENT");
             }
+            for (auto& i : clientSocketList){
+                std::cout << i << " ";
+            }
+            std::cout << "\n";
             return;
         }
-        return;
+        //return;
     }
     int total_len = 0;
 
@@ -632,7 +637,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 send_str = "STATUSRESP," + send_str;
                 std::cout << "[ACTION] Sending statusresp, the message is: " << send_str << "\n";
                 log_message(mission_report, 'a', "Sending statusresp, the message is: " + send_str);
-                sendMessage("", send_str, clientSocket=clientSocket);
+                sendMessage("", send_str, clientSocket);
                 command_prefix = "STATUSREQ";
 
                 found = true;
@@ -651,6 +656,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 int cur_part = 0;
                 std::string current_server = "";
                 serverConnection current_connection;
+                std::vector<int> try_connections;
                 while(index < message.size()){
                     if(message[index] == ';'){
                         current_connection.port = std::stoi(current_server);
@@ -667,11 +673,14 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                         known_servers[current_connection.name] = current_connection;
 
                         if(one_hop_connections.find(current_connection.name) == one_hop_connections.end() && current_connection.name != "A5_67"){
-                            if (one_hop_connections.size() < 8){
+                            if (one_hop_connections.size() + try_connections.size() < 8){
                                 int result = connectToServer(current_connection, autobots);
                                 if (result == -1){
                                     std::cout << "[ERROR] Failed to connect to server\n";
                                     log_message(mission_report, 'e', "Failed to connect to server");
+                                }
+                                else{
+                                    try_connections.push_back(current_connection.socket);
                                 }
                             }
                         }
@@ -909,6 +918,7 @@ int main(int argc, char const *argv[])
                                     std::cout << "[INFO]   RECIEVING\n";
                                     log_message(mission_report, 'i', "Recieving");
                                     int recieved = recv(client->sock, buffer, sizeof(buffer), 0);
+                                    std::cout << "[INFO]   Recieved: " + recieved + "\n";
 
                                     if (recieved == 0)
                                     {
