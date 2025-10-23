@@ -73,7 +73,7 @@ std::vector<int> clientSocketList; // LIST OF SOCKETS THAT ARE NOT SERVERS
 // TODO: HARDCODED CHANGE LATER
 std::string TSAM_IP = "130.208.246.98";
 //std::vector<int> BANNED_PORTS = {4026, 5044, 4005, 4013, 4030, 4099};
-std::vector<int> BANNED_PORTS = {4030, 4130, 60908, 4015, 4042, 4003, 4060, 4444, 4013, 4069, 4130, 4144, 4077, 4023};
+std::vector<int> BANNED_PORTS = {4147};
 const char *path="mission_report";
 std::ofstream mission_report(path);
 
