@@ -72,7 +72,7 @@ std::vector<int> clientSocketList; // LIST OF SOCKETS THAT ARE NOT SERVERS
 // TODO: HARDCODED CHANGE LATER
 std::string TSAM_IP = "130.208.246.98";
 //std::vector<int> BANNED_PORTS = {4026, 5044, 4005, 4013, 4030, 4099};
-std::vector<int> BANNED_PORTS = {4030, 4130, 60908, 4015, 4042, 4003, 4060, 4444, 4013, 4069, 4130, 4147, 4144, 4077};
+std::vector<int> BANNED_PORTS = {4030, 4130, 60908, 4015, 4042, 4003, 4060, 4444, 4013, 4069, 4130, 4144, 4077, 4023};
 const char *path="mission_report";
 std::ofstream mission_report(path);
 
@@ -185,7 +185,8 @@ void sendMessage(std::string client_name, std::string send_message, int socket =
         uint8_t ETX = 0x03;
         uint8_t EOD = 0x04;
         std::vector<uint8_t> message;
-        std::string command = message_to_forward.message_data;
+        std::string command = "SENDMSG," + message_to_forward.to_name + "," + message_to_forward.from_name + message_to_forward.message_data;
+        std::cout << "[INFO] THE COMMAND: " << command + "\n";
         uint16_t length = 1 + 2 + 1 + command.size() + 1;
         uint16_t length_nbo = htons(length);
         message.push_back(SOH);
@@ -672,15 +673,18 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 new_message.message_data = building_message;
 
                 if (new_message.to_name != "A5_67" || new_message.to_name != "67"){
+                    if (one_hop_connections.find(new_message.to_name) != one_hop_connections.end()) {
+                        std::cout << "[ACTION] " << new_message.to_name << " FOUND RIGHT PERSON!\n";
+                        sendMessage(new_message.to_name, new_message.message_data, -1, true, new_message);
+                    }
                     for (auto &current_pair : one_hop_connections) {
                         serverConnection &current_connections = current_pair.second;
                         if(find(new_message.hops.begin(), new_message.hops.end(), current_connections.name) != new_message.hops.end()){
                             std::cout << "[ACTION] " << current_connections.name << " NOT FOUND IN HOPS LIST, FORWARDING MESSAGE\n";
-
+                            sendMessage(current_connections.name, new_message.message_data, current_connections.socket, true, new_message);
                         }
                     }
                 }
-                
                 if(message_queues.find(send_message_to) == message_queues.end()){
                     message_queues[send_message_to] = {new_message};
                 }
