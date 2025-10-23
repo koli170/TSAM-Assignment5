@@ -342,6 +342,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 relayed.from_name = "A5_67";
                 relayed.to_name = group_str;
                 relayed.message_data = cur_message;
+                relayed.hops.push_back("A5_67");
                 if (!one_hop_connections.empty()) {
                     auto it = one_hop_connections.begin();
                     sendMessage(it->first, relayed.message_data, it->second.socket, true, relayed);
@@ -701,14 +702,14 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 new_message.to_name = send_message_to;
                 new_message.message_data = building_message;
 
-                if (new_message.to_name != "A5_67" || new_message.to_name != "67"){
+                if (new_message.to_name != "A5_67" && new_message.to_name != "67"){
                     if (one_hop_connections.find(new_message.to_name) != one_hop_connections.end()) {
                         std::cout << "[ACTION] " << new_message.to_name << " FOUND RIGHT PERSON!\n";
                         sendMessage(new_message.to_name, new_message.message_data, -1, true, new_message);
                     }
                     for (auto &current_pair : one_hop_connections) {
                         serverConnection &current_connections = current_pair.second;
-                        if(find(new_message.hops.begin(), new_message.hops.end(), current_connections.name) != new_message.hops.end()){
+                        if(find(new_message.hops.begin(), new_message.hops.end(), current_connections.name) == new_message.hops.end()){
                             std::cout << "[ACTION] " << current_connections.name << " NOT FOUND IN HOPS LIST, FORWARDING MESSAGE\n";
                             sendMessage(current_connections.name, new_message.message_data, current_connections.socket, true, new_message);
                         }
