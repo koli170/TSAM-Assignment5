@@ -533,6 +533,11 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 if (client_index != clientSocketList.end()){
                     clientSocketList.erase(client_index);
                 }
+
+                if (one_hop_connections.size() - clientSocketList.size() <= MAX_BACKLOG){
+                   std::cout << "[ACTION] SERVER FULL, DISCONNECTING SOCKET " << clientSocket << "\n";
+                    closeClient(clientSocket, autobots);
+                }
                 
                 std::string send_str = "SERVERS,";
                 send_str += "A5_67," + TSAM_IP + ",4067;";
@@ -947,23 +952,21 @@ int main(int argc, char const *argv[])
             for(pollfd &bot : autobots){
                 if((int)bot.fd == listenSock){
                     if(bot.revents & POLLIN){
-                        if(one_hop_connections.size() + autobots_to_add.size() < MAX_BACKLOG){
-                            clientSock = accept(listenSock, (struct sockaddr *)&client,&clientLen);
-                            if (clientSock == -1){
-                                std::cout << "[ERROR] Unable to accept connection\n";
-                                log_message(mission_report, 'e', "Unable to accept connection");
-                                continue;
-                            }
-                            pollfd temp{.fd=clientSock, .events=POLLIN, .revents=0};
-                            autobots_to_add.push_back(temp);
-                            clientSocketList.push_back(temp.fd);
-                            printf("accept***\n");
-                            clients[clientSock] = new Client(clientSock);
-                            n--;
-                            printf("Client connected on server: %d\n", clientSock); //TODO: SEND HELO
-                            log_message(mission_report, 'i', "Client connected on server " + std::to_string(clientSock));
-                            sendMessage("", "HELO,A5_67", clientSock);
+                        clientSock = accept(listenSock, (struct sockaddr *)&client,&clientLen);
+                        if (clientSock == -1){
+                            std::cout << "[ERROR] Unable to accept connection\n";
+                            log_message(mission_report, 'e', "Unable to accept connection");
+                            continue;
                         }
+                        pollfd temp{.fd=clientSock, .events=POLLIN, .revents=0};
+                        autobots_to_add.push_back(temp);
+                        clientSocketList.push_back(temp.fd);
+                        printf("accept***\n");
+                        clients[clientSock] = new Client(clientSock);
+                        n--;
+                        printf("Client connected on server: %d\n", clientSock); //TODO: SEND HELO
+                        log_message(mission_report, 'i', "Client connected on server " + std::to_string(clientSock));
+                        sendMessage("", "HELO,A5_67", clientSock);
                     }
                     bot.revents = 0;
                     break;
