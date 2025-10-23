@@ -24,6 +24,7 @@
 #include <chrono>
 #include <deque>
 #include <fstream>
+#include <set>
 
 #include <unistd.h>
 
@@ -68,11 +69,13 @@ std::map<int, Client*> clients;
 std::map<std::string, serverConnection> one_hop_connections; // KEY: SERVER NAME
 std::map<std::string, serverConnection> known_servers;
 std::map<std::string, std::deque<messageStruct> > message_queues;
+std::vector<int> ports_pending_connection;
+std::chrono::steady_clock::time_point start_pending_timer;
 std::vector<int> clientSocketList; // LIST OF SOCKETS THAT ARE NOT SERVERS
 // TODO: HARDCODED CHANGE LATER
 std::string TSAM_IP = "130.208.246.98";
 //std::vector<int> BANNED_PORTS = {4026, 5044, 4005, 4013, 4030, 4099};
-std::vector<int> BANNED_PORTS = {4030, 4130, 60908, 4015, 4042, 4003, 4060, 4444, 4013, 4069, 4130, 4147, 4144};
+std::vector<int> BANNED_PORTS = {4030, 4130, 60908, 4015, 4042, 4003, 4060, 4444, 4013, 4069, 4130, 4147, 4144, 4077};
 const char *path="mission_report";
 std::ofstream mission_report(path);
 
@@ -247,6 +250,10 @@ int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
         return -1;
     }
 
+    if (find(ports_pending_connection.begin(), ports_pending_connection.end(), victim.port) != ports_pending_connection.end()){
+        std::cout << "[INFO] Port " << victim.port << " is pending\n";
+        return -1;
+    }
     if (connect(connectSock, (sockaddr*) &server_addr, sizeof(server_addr)) < 0){
         std::cout << "[ERROR] Initial connection sock\n";
         log_message(mission_report, 'e', "Initial connection sock");
@@ -254,6 +261,8 @@ int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
     }
     victim.socket = connectSock;
     pollfd temp{.fd=connectSock, .events=POLLIN, .revents=0};
+    ports_pending_connection.push_back(victim.port);
+    start_pending_timer = std::chrono::steady_clock::now();
     autobots.push_back(temp);
     clients[temp.fd] = new Client(temp.fd);
 
@@ -713,7 +722,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                                 known_servers[current_connection.name] = current_connection;
                                 
                                 if(one_hop_connections.find(current_connection.name) == one_hop_connections.end() && 
-                                current_connection.name != "A5_67"){
+                                current_connection.name != "A5_67" && find(try_connections.begin(), try_connections.end(), current_connection.socket) == try_connections.end()){
                                     if (one_hop_connections.size() + try_connections.size() < MAX_BACKLOG){
                                         int result = connectToServer(current_connection, autobots);
                                         if (result > 0){
@@ -841,16 +850,18 @@ int main(int argc, char const *argv[])
 
     std::cout << "[ACTION] starting loop\n";
     log_message(mission_report, 'a', "Starting loop!");
-    auto start = std::chrono::high_resolution_clock::now();
+    auto start = std::chrono::steady_clock::now();
+    start_pending_timer = std::chrono::steady_clock::now();
     while(!finished){
         int n = poll(autobots.data(), autobots.size(), 500);
 
         // KEEP ALIVE SENDING
-        auto time_passed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now() - start);
+        auto time_passed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start);
+        auto time_passed_pending_timer = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start);
         if (time_passed.count() >= 65){
             std::cout << "[ACTION] SENDING KEEPALIVES NOW NOW NOW\n";
             log_message(mission_report, 'a', "Sending keepalives");
-            start = std::chrono::high_resolution_clock::now();
+            start = std::chrono::steady_clock::now();
             for (auto& connection : one_hop_connections){
                 serverConnection recipient = connection.second;
                 if(recipient.name == "A5_67"){
@@ -873,6 +884,14 @@ int main(int argc, char const *argv[])
             // }
             // std::cout << "\n";
             SENDINGSTATUS = !SENDINGSTATUS;
+        }
+
+        if (time_passed_pending_timer.count() >= 20){
+            start_pending_timer = std::chrono::steady_clock::now();
+            if (ports_pending_connection.size() > 0){
+                std::cout << "[ACTION] Clearing pending connections, " << ports_pending_connection.size() << " ports removed\n";
+                ports_pending_connection.clear();
+            }
         }
 
         if (n < 0){
@@ -904,6 +923,7 @@ int main(int argc, char const *argv[])
                             sendMessage("", "HELO,A5_67", clientSock);
                         }
                     }
+                    bot.revents = 0;
                     break;
                 }
             }
@@ -912,13 +932,20 @@ int main(int argc, char const *argv[])
                 autobots.push_back(bot);
             }
             autobots_to_add.clear();
+            std::set<int> unique_fds;
+            for(auto &bot : autobots) {
+                if (unique_fds.count(bot.fd)) {
+                    std::cout << "[ERROR] DUPLICATE FD IN AUTOBOTS: " << bot.fd << "\n";
+                }
+                unique_fds.insert(bot.fd);
+            }
 
                 // Now check for commands from clients
                 std::vector<Client *> disconnectedClients;  
                 for(auto const& pair : clients)
                 {
                     Client *client = pair.second;
-
+                    
                     for(pollfd &check_fd : autobots){
                         if (check_fd.revents == 0)
                             continue;
@@ -926,13 +953,14 @@ int main(int argc, char const *argv[])
                         if (check_fd.fd == client->sock){
                             std::cout << "[INFO]   FOUND SOCKET\n";
                             log_message(mission_report, 'i', "Found socket");
+                            std::cout << "[DEBUG] Processing socket " << client->sock << " revents=" << check_fd.revents << "\n";
                             {
                                 // recv() == 0 means client has closed connection
                                 if(check_fd.revents & POLLHUP)
                                 {
                                     disconnectedClients.push_back(client);
                                     closeClient(client->sock, autobots);
-
+                                    check_fd.revents = 0;
                                 }
                                 // We don't check for -1 (nothing received) because select()
                                 // only triggers if there is something on the socket for us.
@@ -969,11 +997,13 @@ int main(int argc, char const *argv[])
                                     std::cout << "\n"; 
                                     log_message(mission_report, 'i', buffer_str);
                                     clientCommand(client->sock, autobots, buffer, recieved);
+                                    std::cout << "[DEBUG] After processing, revents = " << check_fd.revents << "\n";
                                     check_fd.revents = 0;
                                     }
                                 else{
                                     std::cout << "[ERROR] Unknown poll event on socket " << check_fd.fd << "\n";
                                     log_message(mission_report, 'e', "Unknown poll event on socket");
+                                    check_fd.revents = 0;
                                 }
                             }
                             break;
