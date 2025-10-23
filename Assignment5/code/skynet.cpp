@@ -72,7 +72,7 @@ std::vector<int> clientSocketList; // LIST OF SOCKETS THAT ARE NOT SERVERS
 // TODO: HARDCODED CHANGE LATER
 std::string TSAM_IP = "130.208.246.98";
 //std::vector<int> BANNED_PORTS = {4026, 5044, 4005, 4013, 4030, 4099};
-std::vector<int> BANNED_PORTS = {4030, 4130, 60908, 4015, 4042, 4003, 4060, 4444, 4013, 4069, 4130, 4147, 4144};
+std::vector<int> BANNED_PORTS = {4030, 4130, 60908, 4015, 4042, 4003, 4060, 4444, 4013, 4069, 4130, 4147, 4144, 4077};
 const char *path="mission_report";
 std::ofstream mission_report(path);
 
@@ -171,13 +171,42 @@ void closeClient(int clientSocket, std::vector<pollfd>& autobots)
 
 }
 
-void sendMessage(std::string client_name, std::string send_message, int socket = -1){
+void sendMessage(std::string client_name, std::string send_message, int socket = -1, bool forwarding=false, messageStruct message_to_forward=messageStruct()){
     int send_socket = -1;
     if (one_hop_connections.find(client_name) != one_hop_connections.end()){
         send_socket = one_hop_connections[client_name].socket;
     }
     else if(socket != -1){
         send_socket = socket;
+    }
+    else if (forwarding){
+        uint8_t SOH = 0x01;
+        uint8_t STX = 0x02;
+        uint8_t ETX = 0x03;
+        uint8_t EOD = 0x04;
+        std::vector<uint8_t> message;
+        std::string command = message_to_forward.message_data;
+        uint16_t length = 1 + 2 + 1 + command.size() + 1;
+        uint16_t length_nbo = htons(length);
+        message.push_back(SOH);
+        message.push_back(static_cast<uint8_t>(length_nbo & 0xFF));
+        message.push_back(static_cast<uint8_t>((length_nbo >> 8) & 0xFF));
+        message.push_back(STX);
+        message.insert(message.end(), command.begin(), command.end());
+        message.push_back(static_cast<char>(EOD));
+        for (int i = 0; i < message_to_forward.hops.size(); i++)
+        {
+            message.insert(message.end(), message_to_forward.hops[i].begin(), message_to_forward.hops[i].end());
+            if(i < message_to_forward.hops.size()-1){
+                message.push_back(',');
+            }
+        }
+        message.push_back(static_cast<char>(ETX));
+        std::cout << "[INFO] FORWARDING MESSAGE\n";
+        int result = send(send_socket, message.data(), message.size(), 0);
+        std::cout << result << "\n";
+        std::cout << message.data() << "\n";
+        
     }
     else{
         std::cout << "[ERROR] NOT FOUND CONNECTION FOR SENDING\n";
@@ -412,7 +441,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                     break;
                 }
             }
-            std::cout << "[ERROR] CONNECTION NOT FOUND\n";
+            std::cout << "[ERROR] CONNECTION NOT FOUND";
             return;
         }
 
@@ -641,6 +670,16 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 new_message.from_name = send_message_from;
                 new_message.to_name = send_message_to;
                 new_message.message_data = building_message;
+
+                if (new_message.to_name != "A5_67" || new_message.to_name != "67"){
+                    for (auto &current_pair : one_hop_connections) {
+                        serverConnection &current_connections = current_pair.second;
+                        if(find(new_message.hops.begin(), new_message.hops.end(), current_connections.name) != new_message.hops.end()){
+                            std::cout << "[ACTION] " << current_connections.name << " NOT FOUND IN HOPS LIST, FORWARDING MESSAGE\n";
+
+                        }
+                    }
+                }
                 
                 if(message_queues.find(send_message_to) == message_queues.end()){
                     message_queues[send_message_to] = {new_message};
@@ -760,7 +799,10 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             }
             total_len += msg_len;
     }
-    full_buffer.clear();
+        if (total_len == full_buffer.size() && cur_connection_ptr) {
+        cur_connection_ptr->buffer.clear();
+        cur_connection_ptr->recieved = 0;
+    }
 }
 int main(int argc, char const *argv[])
 {
