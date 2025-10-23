@@ -170,6 +170,8 @@ void closeClient(int clientSocket, std::vector<pollfd>& autobots)
     [clientSocket](const pollfd& p) { return p.fd == clientSocket; });
     if (remove_index != autobots.end()){
         autobots.erase(remove_index);
+        std::cout << "[INFO] Removed socket from autobots, current count: " << autobots.size() << "\n";
+        log_message(mission_report, 'i', "Removed socket from autobots, current count: " + std::to_string(autobots.size()));
     }
 
 }
@@ -266,12 +268,13 @@ int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
         victim.port = 4000 + stoi(id);
     }
     std::cout << "                PORT " << victim.port << "\n";
-    log_message(mission_report, 'i', "PORT: " + victim.port);
+    log_message(mission_report, 'i', "PORT: " + std::to_string(victim.port));
     server_addr.sin_port = htons(victim.port);
 
     for(int port : BANNED_PORTS){
         if(victim.port == port){
             std::cout << "[INFO] Port " << port << " is BANNED, skipping connection\n";
+            log_message(mission_report, 'i', "Port " + std::to_string(port) + " is BANNED, skipping connection");
             return -1;
         }
     }
@@ -282,6 +285,7 @@ int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
 
     if (find(ports_pending_connection.begin(), ports_pending_connection.end(), victim.port) != ports_pending_connection.end()){
         std::cout << "[INFO] Port " << victim.port << " is pending\n";
+        log_message(mission_report, 'i', "Port " + std::to_string(victim.port) + " is pending");
         return -1;
     }
     if (connect(connectSock, (sockaddr*) &server_addr, sizeof(server_addr)) < 0){
@@ -292,9 +296,13 @@ int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
     victim.socket = connectSock;
     pollfd temp{.fd=connectSock, .events=POLLIN, .revents=0};
     ports_pending_connection.push_back(victim.port);
+    std::cout << "[INFO] Added port to pending connections, current count: " << ports_pending_connection.size() << "\n";
+    log_message(mission_report, 'i', "Added port to pending connections, current count: " + std::to_string(ports_pending_connection.size()));
     start_pending_timer = std::chrono::steady_clock::now();
     autobots.push_back(temp);
     clients[temp.fd] = new Client(temp.fd);
+    std::cout << "[INFO] Added client to clients map, current count: " << clients.size() << "\n";
+    log_message(mission_report, 'i', "Added client to clients map, current count: " + std::to_string(clients.size()));
 
 
     std::string command = "HELO,A5_67";
@@ -307,7 +315,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
 
     if (find(clientSocketList.begin(), clientSocketList.end(), clientSocket) != clientSocketList.end()){
         std::cout << "[INFO] COMMAND FROM OUR CLIENT (NOT SERVER)\n";
-        log_message(mission_report, 'i', "COMMAND FROM OUR CLIENT (NOT SERVER");
+        log_message(mission_report, 'i', "COMMAND FROM OUR CLIENT (NOT SERVER)");
         std::string msg(buffer);
         if (msg.find("SENDMSG") != std::string::npos){
             std::string cur_message;
@@ -343,9 +351,13 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             new_message.message_data = cur_message;
             if(message_queues.find(new_message.to_name) == message_queues.end()){
                 message_queues[new_message.to_name] = {new_message};
+                std::cout << "[INFO] Created new message queue for " << new_message.to_name << ", total queues: " << message_queues.size() << "\n";
+                log_message(mission_report, 'i', "Created new message queue for " + new_message.to_name + ", total queues: " + std::to_string(message_queues.size()));
             }
             else{
                 message_queues[new_message.to_name].push_back(new_message);
+                std::cout << "[INFO] Added message to existing queue for " << new_message.to_name << ", queue size: " << message_queues[new_message.to_name].size() << "\n";
+                log_message(mission_report, 'i', "Added message to existing queue for " + new_message.to_name + ", queue size: " + std::to_string(message_queues[new_message.to_name].size()));
             }
             std::string reply = "MESSAGE SENT TO " + group_str;
             int nsent = send(clientSocket, reply.c_str(), reply.size(), 0);
@@ -359,6 +371,8 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             std::string reply;
             if(message_queues.find("A5_67") == message_queues.end()){
                 message_queues["A5_67"] = std::deque<messageStruct>();
+                std::cout << "[INFO] Created message queue for A5_67, total queues: " << message_queues.size() << "\n";
+                log_message(mission_report, 'i', "Created message queue for A5_67, total queues: " + std::to_string(message_queues.size()));
             }
             if(message_queues["A5_67"].empty()){
                 std::cout << "[INFO]   NO NEW MESSAGES\n";
@@ -369,6 +383,8 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 log_message(mission_report, 'a', "Showing oldest message: " + message_queues["A5_67"].front().message_data);
                 reply = "[" + message_queues["A5_67"].front().from_name +  "] " + message_queues["A5_67"].front().message_data;
                 message_queues["A5_67"].pop_front();
+                std::cout << "[INFO] Removed message from queue, remaining messages: " << message_queues["A5_67"].size() << "\n";
+                log_message(mission_report, 'i', "Removed message from queue, remaining messages: " + std::to_string(message_queues["A5_67"].size()));
             }
             int nsent = send(clientSocket, reply.c_str(), reply.size(), 0);
             if (nsent == -1){
@@ -380,7 +396,9 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
         if (msg.find("LISTSERVERS") != std::string::npos){
             std::string all_servers;
             int index = 0;
+            int server_count = 0;
             for (auto& serv : one_hop_connections){
+                server_count++;
                 if (index == 0){
                     all_servers += serv.second.name;
                     index = 1;
@@ -389,8 +407,8 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                     all_servers += ","+serv.second.name;
                 }
             }
-            std::cout << "[ACTION] LISTING SERVERS: " << all_servers << "\n";
-            log_message(mission_report, 'a', "LISTING SERVERS: " + all_servers);
+            std::cout << "[ACTION] LISTING SERVERS: " << all_servers << " (Total: " << server_count << " servers)\n";
+            log_message(mission_report, 'a', "LISTING SERVERS: " + all_servers + " (Total: " + std::to_string(server_count) + " servers)");
             std::string reply = all_servers;  // <-- MISSING SEMICOLON WAS HERE
             int nsent = send(clientSocket, reply.c_str(), reply.size(), 0);
             if (nsent == -1){
@@ -401,6 +419,8 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 std::cout << i << " ";
             }
             std::cout << "\n";
+            std::cout << "[INFO] Client socket list count: " << clientSocketList.size() << "\n";
+            log_message(mission_report, 'i', "Client socket list count: " + std::to_string(clientSocketList.size()));
             return;
         }
         //return;
@@ -425,9 +445,12 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
         cur_connection_ptr->buffer.clear();
         std::cout << "[ACTION] FETCHING OLD UNFINISHED DATA\n";
         std::cout << "[INFO] " << full_buffer.size() << " AMOUNT OF DATA WAS FETCHED\n";
+        log_message(mission_report, 'i', std::to_string(full_buffer.size()) + " AMOUNT OF DATA WAS FETCHED");
     }
     
     full_buffer.insert(full_buffer.end(), buffer, buffer + recieved);
+    std::cout << "[INFO] Total buffer size after adding new data: " << full_buffer.size() << "\n";
+    log_message(mission_report, 'i', "Total buffer size after adding new data: " + std::to_string(full_buffer.size()));
 
     std::cout << "[ACTION] DOING SERVER COMMAND\n";
     log_message(mission_report, 'a', "DOING SERVER COMMAND");
@@ -448,6 +471,8 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                                                 full_buffer.end());
                     connection.second.recieved = full_buffer.size() - total_len;
                     std::cout << "[ACTION] PARTIAL HEADER, SAVING AND MOVING ON\n";
+                    std::cout << "[INFO] Saved " << connection.second.recieved << " bytes for later processing\n";
+                    log_message(mission_report, 'i', "Saved " + std::to_string(connection.second.recieved) + " bytes for later processing");
                     break;
                 }
             }
@@ -474,6 +499,8 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                                                 full_buffer.end());
                     connection.second.recieved = full_buffer.size() - total_len;
                     std::cout << "[ACTION] UNFINISHED DATA, SAVING AND MOVING ON\n";
+                    std::cout << "[INFO] Need " << msg_len << " bytes but only have " << (full_buffer.size() - total_len) << " bytes available\n";
+                    log_message(mission_report, 'i', "Need " + std::to_string(msg_len) + " bytes but only have " + std::to_string(full_buffer.size() - total_len) + " bytes available");
                     break;
                 }
             }
@@ -481,6 +508,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
         }
 
         std::cout << "[INFO]   received message has a length of: " << msg_len << "\n";
+        log_message(mission_report, 'i', "Received message has a length of: " + std::to_string(msg_len));
 
         std::string message;
         message.insert(message.end(),
@@ -510,15 +538,19 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 command_prefix = "HELO";
                 found = true;
                 std::cout << "[ACTION] DOING HELO\n";
-                    log_message(mission_report, 'a', "Doing HELO");
+                log_message(mission_report, 'a', "Doing HELO");
                 std::string group_name_str = "";
                 group_name_str.insert(group_name_str.end(), full_buffer.begin() + total_len + 9, full_buffer.begin() + total_len + msg_len - 1);
                 std::cout << "[INFO]   The current group name: " << group_name_str << "\n";
-                    log_message(mission_report, 'i', "The current group name: " + group_name_str);
+                log_message(mission_report, 'i', "The current group name: " + group_name_str);
                 serverConnection temp={.name=group_name_str, .addr=TSAM_IP, .port=-1, .socket=clientSocket};
                 one_hop_connections[group_name_str] = temp;
+                std::cout << "[INFO] Added server to one_hop_connections, total count: " << one_hop_connections.size() << "\n";
+                log_message(mission_report, 'i', "Added server to one_hop_connections, total count: " + std::to_string(one_hop_connections.size()));
                 if (message_queues.find(group_name_str) == message_queues.end()){
                     message_queues[group_name_str] = {};
+                    std::cout << "[INFO] Created message queue for " << group_name_str << ", total queues: " << message_queues.size() << "\n";
+                    log_message(mission_report, 'i', "Created message queue for " + group_name_str + ", total queues: " + std::to_string(message_queues.size()));
                 }
                 if (cur_connection_ptr == nullptr) {
                     for (auto& connection : one_hop_connections) {
@@ -533,11 +565,15 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 auto client_index = find(clientSocketList.begin(), clientSocketList.end(), clientSocket);
                 if (client_index != clientSocketList.end()){
                     clientSocketList.erase(client_index);
+                    std::cout << "[INFO] Removed socket from clientSocketList, remaining count: " << clientSocketList.size() << "\n";
+                    log_message(mission_report, 'i', "Removed socket from clientSocketList, remaining count: " + std::to_string(clientSocketList.size()));
                 }
                 
                 std::string send_str = "SERVERS,";
                 send_str += "A5_67," + TSAM_IP + ",4067;";
+                int server_count = 0;
                 for (auto& one_hopper : one_hop_connections){
+                    server_count++;
                     // Validate before adding to broadcast
                     if (one_hopper.second.port > 0 && 
                         one_hopper.second.port < 65536 &&
@@ -549,7 +585,9 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                     }
                 }
                 std::cout << "[INFO]   The send string: " << send_str << "\n";
-                    log_message(mission_report, 'i', "The send string: " + send_str);
+                std::cout << "[INFO]   Broadcasting " << server_count << " servers\n";
+                log_message(mission_report, 'i', "The send string: " + send_str);
+                log_message(mission_report, 'i', "Broadcasting " + std::to_string(server_count) + " servers");
                 sendMessage(group_name_str, send_str);
             }
         catch(...){
@@ -603,12 +641,16 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                     }
                 }
                 if (exists){
+                    int messages_sent = 0;
                     while (message_queues[recipient.name].size() > 0){
                         messageStruct current_msg = message_queues[recipient.name].front();
                         message_queues[recipient.name].pop_front();
                         std::string send_str = "SENDMSG," + current_msg.to_name + "," + current_msg.from_name + "," + current_msg.message_data;
                         sendMessage(recipient.name, send_str);
+                        messages_sent++;
                     }
+                    std::cout << "[INFO] Sent " << messages_sent << " messages to " << recipient.name << "\n";
+                    log_message(mission_report, 'i', "Sent " + std::to_string(messages_sent) + " messages to " + recipient.name);
                 }
             } 
             else if (message.rfind("SENDMSG") != -1){
@@ -661,18 +703,23 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 }
                 if (message_has_hops){
                     std::string cur_group = "";
+                    int hop_count = 0;
                     for (int i = hop_index; i < msg_len; i++)
                     {
                         if (message[i] == ','){
                             std::cout << "[INFO] adding " << cur_group << " to message hop\n";
                             new_message.hops.push_back(cur_group);
                             cur_group = "";
+                            hop_count++;
                         }
                         else{
                             cur_group += message[i];
                         }
                     }
                     new_message.hops.push_back("A5_67");
+                    hop_count++;
+                    std::cout << "[INFO] Added " << hop_count << " hops to message\n";
+                    log_message(mission_report, 'i', "Added " + std::to_string(hop_count) + " hops to message");
                     
                 }
                 std::cout << "THE MESSAGE DATA: " << building_message << "\n";
@@ -686,26 +733,36 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                         std::cout << "[ACTION] " << new_message.to_name << " FOUND RIGHT PERSON!\n";
                         sendMessage(new_message.to_name, new_message.message_data, -1, true, new_message);
                     }
+                    int forwarded_count = 0;
                     for (auto &current_pair : one_hop_connections) {
                         serverConnection &current_connections = current_pair.second;
                         if(find(new_message.hops.begin(), new_message.hops.end(), current_connections.name) != new_message.hops.end()){
                             std::cout << "[ACTION] " << current_connections.name << " NOT FOUND IN HOPS LIST, FORWARDING MESSAGE\n";
                             sendMessage(current_connections.name, new_message.message_data, current_connections.socket, true, new_message);
+                            forwarded_count++;
                         }
                     }
+                    std::cout << "[INFO] Forwarded message to " << forwarded_count << " servers\n";
+                    log_message(mission_report, 'i', "Forwarded message to " + std::to_string(forwarded_count) + " servers");
                 }
                 if(message_queues.find(send_message_to) == message_queues.end()){
                     message_queues[send_message_to] = {new_message};
+                    std::cout << "[INFO] Created new message queue for " << send_message_to << ", total queues: " << message_queues.size() << "\n";
+                    log_message(mission_report, 'i', "Created new message queue for " + send_message_to + ", total queues: " + std::to_string(message_queues.size()));
                 }
                 else{
                     message_queues[send_message_to].push_back(new_message);
+                    std::cout << "[INFO] Added message to existing queue for " << send_message_to << ", queue size: " << message_queues[send_message_to].size() << "\n";
+                    log_message(mission_report, 'i', "Added message to existing queue for " + send_message_to + ", queue size: " + std::to_string(message_queues[send_message_to].size()));
                 }
             } 
             else if (message.rfind("STATUSREQ") != -1){
                 std::string send_str = "";
                 int index = 0;
+                int server_count = 0;
                 for (const auto& pair : one_hop_connections){
                     serverConnection server = pair.second;
+                    server_count++;
                     if (index == 0){
                         if (message_queues.find(server.name) != message_queues.end()){
                             send_str += server.name + "," + std::to_string(message_queues[server.name].size());
@@ -725,8 +782,8 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                     }
                 }
                 send_str = "STATUSRESP," + send_str;
-                std::cout << "[ACTION] Sending statusresp, the message is: " << send_str << "\n";
-                log_message(mission_report, 'a', "Sending statusresp, the message is: " + send_str);
+                std::cout << "[ACTION] Sending statusresp for " << server_count << " servers, the message is: " << send_str << "\n";
+                log_message(mission_report, 'a', "Sending statusresp for " + std::to_string(server_count) + " servers, the message is: " + send_str);
                 sendMessage("", send_str, clientSocket);
                 command_prefix = "STATUSREQ";
 
@@ -745,11 +802,14 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 std::string current_server = "";
                 serverConnection current_connection;
                 std::vector<int> try_connections;
+                int server_count = 0;
+                int connection_attempts = 0;
                 
                 while(index < message.size()){
                     if(message[index] == ';'){
                         if (cur_part == 2) {  // Only process if we have all 3 parts
                             current_connection.port = std::stoi(current_server);
+                            server_count++;
                             
                             // VALIDATION: Check if this entry makes sense
                             if (current_connection.port > 3000 && current_connection.port < 65536 &&
@@ -770,6 +830,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                                         int result = connectToServer(current_connection, autobots);
                                         if (result > 0){
                                             try_connections.push_back(current_connection.socket);
+                                            connection_attempts++;
                                         }
                                     }
                                 }
@@ -799,22 +860,28 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                     }
                     index += 1;
                 }
+                std::cout << "[INFO] Processed " << server_count << " servers from SERVER command, attempted " << connection_attempts << " new connections\n";
+                log_message(mission_report, 'i', "Processed " + std::to_string(server_count) + " servers from SERVER command, attempted " + std::to_string(connection_attempts) + " new connections");
             }
             else if (message.rfind("STATUSRESP") != -1){
                 command_prefix = "STATUSRESP";
                 found = true;
             } 
             std::cout << "[INFO]   The current command prefix: " << command_prefix << "\n";
-            log_message(mission_report, 'i', "The current comman prefix: " + command_prefix);
+            log_message(mission_report, 'i', "The current command prefix: " + command_prefix);
             if(found == false){
                 //std::cout << "Unrecognized command prefix";
                 return;
             }
             total_len += msg_len;
+            std::cout << "[INFO] Processed " << msg_len << " bytes, total processed: " << total_len << "/" << full_buffer.size() << "\n";
+            log_message(mission_report, 'i', "Processed " + std::to_string(msg_len) + " bytes, total processed: " + std::to_string(total_len) + "/" + std::to_string(full_buffer.size()));
     }
         if (total_len == full_buffer.size() && cur_connection_ptr) {
         cur_connection_ptr->buffer.clear();
         cur_connection_ptr->recieved = 0;
+        std::cout << "[INFO] Fully processed buffer, cleared connection buffer\n";
+        log_message(mission_report, 'i', "Fully processed buffer, cleared connection buffer");
     }
 }
 int main(int argc, char const *argv[])
@@ -860,6 +927,8 @@ int main(int argc, char const *argv[])
     else {
         pollfd temp{.fd=listenSock, .events=POLLIN, .revents=0};
         autobots.push_back(temp);
+        std::cout << "[INFO] Added listen socket to autobots, initial count: " << autobots.size() << "\n";
+        log_message(mission_report, 'i', "Added listen socket to autobots, initial count: " + std::to_string(autobots.size()));
     }
 
     int connectSock = socket(AF_INET, SOCK_STREAM, 0);
@@ -891,6 +960,8 @@ int main(int argc, char const *argv[])
     pollfd temp{.fd=connectSock, .events=POLLIN, .revents=0};
     autobots.push_back(temp);
     clients[temp.fd] = new Client(temp.fd);
+    std::cout << "[INFO] Added connect socket to autobots, current count: " << autobots.size() << "\n";
+    log_message(mission_report, 'i', "Added connect socket to autobots, current count: " + std::to_string(autobots.size()));
 
     sendMessage("", "HELO,A5_67", connectSock);
 
@@ -900,6 +971,8 @@ int main(int argc, char const *argv[])
     start_pending_timer = std::chrono::steady_clock::now();
     while(!finished){
         int n = poll(autobots.data(), autobots.size(), 500);
+        std::cout << "[INFO] Poll returned " << n << " events, monitoring " << autobots.size() << " sockets\n";
+        log_message(mission_report, 'i', "Poll returned " + std::to_string(n) + " events, monitoring " + std::to_string(autobots.size()) + " sockets");
 
         // KEEP ALIVE SENDING
         auto time_passed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start);
@@ -908,6 +981,7 @@ int main(int argc, char const *argv[])
             std::cout << "[ACTION] SENDING KEEPALIVES NOW NOW NOW\n";
             log_message(mission_report, 'a', "Sending keepalives");
             start = std::chrono::steady_clock::now();
+            int keepalive_count = 0;
             for (auto& connection : one_hop_connections){
                 serverConnection recipient = connection.second;
                 if(recipient.name == "A5_67"){
@@ -918,7 +992,10 @@ int main(int argc, char const *argv[])
                 }
                 std::string message_to_send = "KEEPALIVE," + std::to_string(message_queues[recipient.name].size());
                 sendMessage(recipient.name, message_to_send);
+                keepalive_count++;
             }
+            std::cout << "[INFO] Sent keepalives to " << keepalive_count << " servers\n";
+            log_message(mission_report, 'i', "Sent keepalives to " + std::to_string(keepalive_count) + " servers");
 
             // std::cout << "\n\n\nTEST\nALL SOCKS: ";
             // for (auto& sock : autobots){
@@ -935,7 +1012,8 @@ int main(int argc, char const *argv[])
         if (time_passed_pending_timer.count() >= 20){
             start_pending_timer = std::chrono::steady_clock::now();
             if (ports_pending_connection.size() > 0){
-                std::cout << "[ACTION] Clearing pending connections, " << ports_pending_connection.size() << " ports removed\n";
+                std::cout << "[ACTION] Clearing " << ports_pending_connection.size() << " pending connections\n";
+                log_message(mission_report, 'a', "Clearing " + std::to_string(ports_pending_connection.size()) + " pending connections");
                 ports_pending_connection.clear();
             }
         }
@@ -966,6 +1044,8 @@ int main(int argc, char const *argv[])
                             n--;
                             printf("Client connected on server: %d\n", clientSock); //TODO: SEND HELO
                             log_message(mission_report, 'i', "Client connected on server " + std::to_string(clientSock));
+                            std::cout << "[INFO] Added new client, autobots count: " << autobots.size() + autobots_to_add.size() << ", clients count: " << clients.size() << "\n";
+                            log_message(mission_report, 'i', "Added new client, autobots count: " + std::to_string(autobots.size() + autobots_to_add.size()) + ", clients count: " + std::to_string(clients.size()));
                             sendMessage("", "HELO,A5_67", clientSock);
                         }
                     }
@@ -982,12 +1062,16 @@ int main(int argc, char const *argv[])
             for(auto &bot : autobots) {
                 if (unique_fds.count(bot.fd)) {
                     std::cout << "[ERROR] DUPLICATE FD IN AUTOBOTS: " << bot.fd << "\n";
+                    log_message(mission_report, 'e', "DUPLICATE FD IN AUTOBOTS: " + std::to_string(bot.fd));
                 }
                 unique_fds.insert(bot.fd);
             }
+            std::cout << "[INFO] Unique FDs in autobots: " << unique_fds.size() << "\n";
+            log_message(mission_report, 'i', "Unique FDs in autobots: " + std::to_string(unique_fds.size()));
 
                 // Now check for commands from clients
                 std::vector<Client *> disconnectedClients;  
+                int processed_clients = 0;
                 for(auto const& pair : clients)
                 {
                     Client *client = pair.second;
@@ -997,6 +1081,7 @@ int main(int argc, char const *argv[])
                             continue;
 
                         if (check_fd.fd == client->sock){
+                            processed_clients++;
                             std::cout << "[INFO]   FOUND SOCKET\n";
                             log_message(mission_report, 'i', "Found socket");
                             std::cout << "[DEBUG] Processing socket " << client->sock << " revents=" << check_fd.revents << "\n";
@@ -1016,7 +1101,8 @@ int main(int argc, char const *argv[])
                                     log_message(mission_report, 'i', "Recieving");
                                     memset(buffer, 0, sizeof(buffer));
                                     int recieved = recv(client->sock, buffer, sizeof(buffer), 0);
-                                    std::cout << "[INFO]   Recieved: " << recieved << "\n";
+                                    std::cout << "[INFO]   Recieved: " << recieved << " bytes\n";
+                                    log_message(mission_report, 'i', "Recieved: " + std::to_string(recieved) + " bytes");
 
                                     if (recieved == 0)
                                     {
@@ -1038,7 +1124,7 @@ int main(int argc, char const *argv[])
                                             buffer_str += c;
                                         }else{
                                             std::cout << "\\x" << std::hex << (int)c << std::dec;
-                                            buffer_str += "\\x" + int(c);
+                                            buffer_str += "\\x" + std::to_string(int(c));
                                         }}
                                     std::cout << "\n"; 
                                     log_message(mission_report, 'i', buffer_str);
@@ -1056,17 +1142,23 @@ int main(int argc, char const *argv[])
                         }
                     }
                 }
+                std::cout << "[INFO] Processed " << processed_clients << " clients this iteration\n";
+                log_message(mission_report, 'i', "Processed " + std::to_string(processed_clients) + " clients this iteration");
                 // Remove client from the clients list
                 for (auto const& c : disconnectedClients) {
                     for (auto it = one_hop_connections.begin(); it != one_hop_connections.end(); ) {
                         if (it->second.socket == c->sock) {
                             it = one_hop_connections.erase(it);
+                            std::cout << "[INFO] Removed connection from one_hop_connections, remaining: " << one_hop_connections.size() << "\n";
+                            log_message(mission_report, 'i', "Removed connection from one_hop_connections, remaining: " + std::to_string(one_hop_connections.size()));
                             break;
                         } else {
                             ++it;
                         }
                     }
                     clients.erase(c->sock);
+                    std::cout << "[INFO] Removed client from clients map, remaining: " << clients.size() << "\n";
+                    log_message(mission_report, 'i', "Removed client from clients map, remaining: " + std::to_string(clients.size()));
                 }
 
 
@@ -1078,5 +1170,3 @@ int main(int argc, char const *argv[])
 
     return 0;
 }
-
-
