@@ -283,6 +283,11 @@ int connectToServer(serverConnection &victim, std::vector<pollfd> &autobots){
         std::cout << "[INFO] Port " << victim.port << " is pending\n";
         return -1;
     }
+    struct timeval tv;
+    tv.tv_sec = 2;
+    tv.tv_usec = 0;
+    setsockopt(connectSock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
     if (connect(connectSock, (sockaddr*) &server_addr, sizeof(server_addr)) < 0){
         std::cout << "[ERROR] Initial connection sock\n";
         log_message(mission_report, 'e', "Initial connection sock");
@@ -897,6 +902,11 @@ int main(int argc, char const *argv[])
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(connect_port);
+
+    struct timeval tv;
+    tv.tv_sec = 2;
+    tv.tv_usec = 0;
+    setsockopt(connectSock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     if (connect(connectSock, (sockaddr*) &server_addr, sizeof(server_addr)) < 0){
         std::cout << "[ERROR] Initial connection sock\n";
