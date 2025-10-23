@@ -61,6 +61,7 @@ struct messageStruct{
     std::string from_name;
     std::string to_name;
     std::string message_data;
+    std::vector<std::string> hops;
 };
 
 std::map<int, Client*> clients;
@@ -71,7 +72,7 @@ std::vector<int> clientSocketList; // LIST OF SOCKETS THAT ARE NOT SERVERS
 // TODO: HARDCODED CHANGE LATER
 std::string TSAM_IP = "130.208.246.98";
 //std::vector<int> BANNED_PORTS = {4026, 5044, 4005, 4013, 4030, 4099};
-std::vector<int> BANNED_PORTS = {4030, 4130, 60908, 4015, 4042, 4003, 4060};
+std::vector<int> BANNED_PORTS = {4030, 4130, 60908, 4015, 4042, 4003, 4060, 4444, 4013, 4069, 4130, 4147, 4144};
 const char *path="mission_report";
 std::ofstream mission_report(path);
 
@@ -274,7 +275,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             bool got_id = false;
             std::string group_str = "";
 
-            for (int i = 8; i < recieved; i++) {
+            for (int i = MAX_BACKLOG; i < recieved; i++) {
                 if (!got_id && buffer[i] == ',') {
                     got_id = true;
                     continue;
@@ -411,6 +412,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                     break;
                 }
             }
+            std::cout << "[ERROR] CONNECTION NOT FOUND\n";
             return;
         }
 
@@ -465,44 +467,55 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
         bool found = false;
         
         if (message.find("HELO") != std::string::npos){
-            command_prefix = "HELO";
-            found = true;
-            std::cout << "[ACTION] DOING HELO\n";
-                log_message(mission_report, 'a', "Doing HELO");
-            std::string group_name_str = "";
-            group_name_str.insert(group_name_str.end(), full_buffer.begin() + total_len + 9, full_buffer.begin() + total_len + msg_len - 1);
-            std::cout << "[INFO]   The current group name: " << group_name_str << "\n";
-                log_message(mission_report, 'i', "The current group name: " + group_name_str);
-            serverConnection temp={.name=group_name_str, .addr=TSAM_IP, .port=-1, .socket=clientSocket};
-            one_hop_connections[group_name_str] = temp;
-            if (message_queues.find(group_name_str) == message_queues.end()){
-                message_queues[group_name_str] = {};
-            }
-            if (cur_connection_ptr == nullptr) {
-                for (auto& connection : one_hop_connections) {
-                    if (connection.second.socket == clientSocket) {
-                        cur_connection_ptr = &connection.second;
-                        break;
+            try{
+                command_prefix = "HELO";
+                found = true;
+                std::cout << "[ACTION] DOING HELO\n";
+                    log_message(mission_report, 'a', "Doing HELO");
+                std::string group_name_str = "";
+                group_name_str.insert(group_name_str.end(), full_buffer.begin() + total_len + 9, full_buffer.begin() + total_len + msg_len - 1);
+                std::cout << "[INFO]   The current group name: " << group_name_str << "\n";
+                    log_message(mission_report, 'i', "The current group name: " + group_name_str);
+                serverConnection temp={.name=group_name_str, .addr=TSAM_IP, .port=-1, .socket=clientSocket};
+                one_hop_connections[group_name_str] = temp;
+                if (message_queues.find(group_name_str) == message_queues.end()){
+                    message_queues[group_name_str] = {};
+                }
+                if (cur_connection_ptr == nullptr) {
+                    for (auto& connection : one_hop_connections) {
+                        if (connection.second.socket == clientSocket) {
+                            cur_connection_ptr = &connection.second;
+                            break;
+                        }
                     }
                 }
-            }
 
-            // REMOVE FROM CLIENT LIST, SINCE THIS IS A SERVER
-            auto client_index = find(clientSocketList.begin(), clientSocketList.end(), clientSocket);
-            if (client_index != clientSocketList.end()){
-                clientSocketList.erase(client_index);
+                // REMOVE FROM CLIENT LIST, SINCE THIS IS A SERVER
+                auto client_index = find(clientSocketList.begin(), clientSocketList.end(), clientSocket);
+                if (client_index != clientSocketList.end()){
+                    clientSocketList.erase(client_index);
+                }
+                
+                std::string send_str = "SERVERS,";
+                send_str += "A5_67," + TSAM_IP + ",4067;";
+                for (auto& one_hopper : one_hop_connections){
+                    // Validate before adding to broadcast
+                    if (one_hopper.second.port > 0 && 
+                        one_hopper.second.port < 65536 &&
+                        one_hopper.second.name.find('.') == std::string::npos) {
+                        
+                        send_str += one_hopper.second.name + ",";
+                        send_str += one_hopper.second.addr + ",";
+                        send_str += std::to_string(one_hopper.second.port) + ";";
+                    }
+                }
+                std::cout << "[INFO]   The send string: " << send_str << "\n";
+                    log_message(mission_report, 'i', "The send string: " + send_str);
+                sendMessage(group_name_str, send_str);
             }
-            
-            std::string send_str = "SERVERS,";
-            send_str += "A5_67," + TSAM_IP + ",4067;";
-            for (auto& one_hopper : one_hop_connections){
-                send_str += one_hopper.second.name + ",";
-                send_str += one_hopper.second.addr + std::string(",");
-                send_str += std::to_string(one_hopper.second.port) + ";";
-            }
-            std::cout << "[INFO]   The send string: " << send_str << "\n";
-                log_message(mission_report, 'i', "The send string: " + send_str);
-            sendMessage(group_name_str, send_str);
+        catch(...){
+            std::cout << "[ERROR] HELO COMMAND NOT IN PROTOCOL\n";
+        }
         } 
             else if (message.rfind("KEEPALIVE") != -1){
                 try
@@ -573,12 +586,15 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 std::string building_message = "";
                 int checks = 0;
                 std::string send_message_to = "";
+                uint8_t EOD = 0x04;
+                int hop_index = 0;
+                bool message_has_hops = false;
                 std::string send_message_from = "";
                 std::cout << "[INFO] PARSING SEND MESSAGE STRING: " << building_message << " ";
                 log_message(mission_report, 'i', "PARSING SEND MESSAGE STRING: " + building_message);
                 for (int i = 11; i < msg_len; i++)
                 {
-                    if (message[i] == ',' && checks < 3){
+                    if (message[i] == ',' && checks <3){
                         if(checks == 1){
                             send_message_to = building_message;
                             std::cout << "SENDING MESSAGE TO: " << send_message_to << " ";
@@ -595,8 +611,30 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                         continue;
                     }
                     else{
+                        uint8_t static_cast_val = static_cast<int>(message[i]);
+                        if (static_cast_val == EOD){
+                            message_has_hops = true;
+                            hop_index = i+1;
+                            break;
+                        }
                         building_message += message[i];
                     }
+                }
+                if (message_has_hops){
+                    std::string cur_group = "";
+                    for (int i = hop_index; i < msg_len; i++)
+                    {
+                        if (message[i] == ','){
+                            std::cout << "[INFO] adding " << cur_group << " to message hop\n";
+                            new_message.hops.push_back(cur_group);
+                            cur_group = "";
+                        }
+                        else{
+                            cur_group += message[i];
+                        }
+                    }
+                    new_message.hops.push_back("A5_67");
+                    
                 }
                 std::cout << "THE MESSAGE DATA: " << building_message << "\n";
                 log_message(mission_report, 'i', "THE MESSAGE DATA: " + building_message);
@@ -650,57 +688,56 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                 std::cout << "[ACTION] DOING SERVER\n";
                 log_message(mission_report, 'a', "Doing SERVER");
                 
-                std::cout << "[INFO]   The message: "<< message << "\n"; 
-                log_message(mission_report, 'i', "The message: " + message);
                 int index = 12;
                 int cur_part = 0;
                 std::string current_server = "";
                 serverConnection current_connection;
                 std::vector<int> try_connections;
+                
                 while(index < message.size()){
                     if(message[index] == ';'){
-                        current_connection.port = std::stoi(current_server);
-                        std::cout << "PORT: " << current_server << " ";
-                        log_message(mission_report, 'i', "PORT: " + current_server);
-                        current_server = "";
-                        if(one_hop_connections.find(current_connection.name) != one_hop_connections.end()){
-                            std::string lookup_name = current_connection.name;
-                            if(one_hop_connections[lookup_name].port == -1){
-                                one_hop_connections[lookup_name].port = current_connection.port;
+                        if (cur_part == 2) {  // Only process if we have all 3 parts
+                            current_connection.port = std::stoi(current_server);
+                            
+                            // VALIDATION: Check if this entry makes sense
+                            if (current_connection.port > 3000 && current_connection.port < 65536 &&
+                                !current_connection.name.empty() && 
+                                current_connection.name.find('.') == std::string::npos &&  // Name shouldn't contain dots
+                                current_connection.addr.find('.') != std::string::npos) {  // IP should contain dots
+                                
+                                std::cout << "NAME: " << current_connection.name << " ";
+                                std::cout << "IP: " << current_connection.addr << " ";
+                                std::cout << "PORT: " << current_connection.port << "\n";
+                                
+                                // Store and potentially connect...
+                                known_servers[current_connection.name] = current_connection;
+                                
+                                if(one_hop_connections.find(current_connection.name) == one_hop_connections.end() && 
+                                current_connection.name != "A5_67"){
+                                    if (one_hop_connections.size() + try_connections.size() < MAX_BACKLOG){
+                                        int result = connectToServer(current_connection, autobots);
+                                        if (result > 0){
+                                            try_connections.push_back(current_connection.socket);
+                                        }
+                                    }
+                                }
+                            } else {
+                                std::cout << "[ERROR] Invalid server entry - skipping\n";
+                                log_message(mission_report, 'e', "Invalid server entry: " + current_connection.name);
                             }
                         }
-
-                        known_servers[current_connection.name] = current_connection;
-
-                        if(one_hop_connections.find(current_connection.name) == one_hop_connections.end() && current_connection.name != "A5_67"){
-                            if (one_hop_connections.size() + try_connections.size() < 8){
-                                int result = connectToServer(current_connection, autobots);
-                                if (result == -1){
-                                    std::cout << "[ERROR] Failed to connect to server\n";
-                                    log_message(mission_report, 'e', "Failed to connect to server");
-                                }
-                                else{
-                                    try_connections.push_back(current_connection.socket);
-                                }
-                            }
-                        }
-
+                        
                         current_connection = serverConnection{};
                         current_server = "";
                         cur_part = 0;
-                        std::cout << "\n";
                     }
                     else if(message[index] == ','){
                         if(cur_part == 0){
                             current_connection.name = current_server;
-                            std::cout << "[INFO]   NAME: " << current_server << " ";
-                            log_message(mission_report, 'i', "NAME: " + current_server);
                             current_server = "";
                         }
                         else if(cur_part == 1){
                             current_connection.addr = current_server;
-                            std::cout << "IP: " << current_server << " ";
-                            log_message(mission_report, 'i', "IP: " + current_server);
                             current_server = "";
                         }
                         cur_part += 1;
@@ -710,7 +747,6 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
                     }
                     index += 1;
                 }
-
             }
             else if (message.rfind("STATUSRESP") != -1){
                 command_prefix = "STATUSRESP";
@@ -724,6 +760,7 @@ void clientCommand(int clientSocket, std::vector<pollfd>& autobots, char *buffer
             }
             total_len += msg_len;
     }
+    full_buffer.clear();
 }
 int main(int argc, char const *argv[])
 {
@@ -800,21 +837,7 @@ int main(int argc, char const *argv[])
     autobots.push_back(temp);
     clients[temp.fd] = new Client(temp.fd);
 
-    uint8_t SOH = 0x01;
-    uint8_t STX = 0x02;
-    uint8_t ETX = 0x03;
-    std::vector<uint8_t> message;
-    std::string command = "HELO,A5_67";
-    uint16_t length = 1 + 2 + 1 + command.size() + 1;
-    uint16_t length_nbo = htons(length);
-
-    message.push_back(SOH);
-    message.push_back(static_cast<uint8_t>(length_nbo & 0xFF));
-    message.push_back(static_cast<uint8_t>((length_nbo >> 8) & 0xFF));
-    message.push_back(STX);
-    message.insert(message.end(), command.begin(), command.end());
-    message.push_back(static_cast<char>(ETX));
-    int sendtest = send(connectSock, message.data(), message.size(), 0);
+    sendMessage("", "HELO,A5_67", connectSock);
 
     std::cout << "[ACTION] starting loop\n";
     log_message(mission_report, 'a', "Starting loop!");
@@ -917,8 +940,9 @@ int main(int argc, char const *argv[])
                                 {
                                     std::cout << "[INFO]   RECIEVING\n";
                                     log_message(mission_report, 'i', "Recieving");
+                                    memset(buffer, 0, sizeof(buffer));
                                     int recieved = recv(client->sock, buffer, sizeof(buffer), 0);
-                                    std::cout << "[INFO]   Recieved: " + recieved + "\n";
+                                    std::cout << "[INFO]   Recieved: " << recieved << "\n";
 
                                     if (recieved == 0)
                                     {
@@ -952,6 +976,7 @@ int main(int argc, char const *argv[])
                                     log_message(mission_report, 'e', "Unknown poll event on socket");
                                 }
                             }
+                            break;
                         }
                     }
                 }
